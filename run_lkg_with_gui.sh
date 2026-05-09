@@ -16,6 +16,8 @@ usage() {
     echo "Options:"
     echo "  --gui-only       Launch only the control panel (no player)"
     echo "  --force-player   Force player launch even if LKG not detected"
+    echo "  --monitor N      Monitor index (1 or 2)"
+    echo "  --calib-file     Path to specific calibration JSON"
     exit 1
 }
 
@@ -46,6 +48,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --monitor)
             MONITOR="$2"
+            shift 2
+            ;;
+        --calib-file)
+            USER_CALIB_FILE="$2"
             shift 2
             ;;
         *)
@@ -85,16 +91,18 @@ if [ "$GUI_ONLY" = true ]; then
     echo "Running in GUI ONLY mode (No Player)."
 else
     # Build player command with proper flags
-    PLAYER_ARGS=("$INPUT_FILE" --monitor "$MONITOR" --loop --depth-loc 3)
+    PLAYER_ARGS="$INPUT_FILE --monitor $MONITOR --loop --depth-loc 3"
     
     # Add calibration file if exists
-    if [ -f "$CALIB_FILE" ]; then
-        PLAYER_ARGS+=(--calib-file "$CALIB_FILE")
+    if [ -n "${USER_CALIB_FILE:-}" ] && [ -f "$USER_CALIB_FILE" ]; then
+        PLAYER_ARGS="$PLAYER_ARGS --calib-file $USER_CALIB_FILE"
+    elif [ -f "$CALIB_FILE" ]; then
+        PLAYER_ARGS="$PLAYER_ARGS --calib-file $CALIB_FILE"
     fi
     
     # Start the Player in the background
     echo "Starting player: $INPUT_FILE on Monitor $MONITOR"
-    "$VENV_PYTHON" "$PLAYER_SCRIPT" "${PLAYER_ARGS[@]}" &
+    $VENV_PYTHON $PLAYER_SCRIPT $PLAYER_ARGS &
     PLAYER_PID=$!
     
     # Wait for player to initialize
@@ -103,4 +111,8 @@ fi
 
 # Start the Control Panel (foreground - blocks until closed)
 echo "Launching Control Panel for Monitor $MONITOR..."
-$VENV_PYTHON $GUI_SCRIPT --monitor $MONITOR
+GUI_ARGS="--monitor $MONITOR"
+if [ -n "${USER_CALIB_FILE:-}" ] && [ -f "$USER_CALIB_FILE" ]; then
+    GUI_ARGS="$GUI_ARGS --calib-file $USER_CALIB_FILE"
+fi
+$VENV_PYTHON $GUI_SCRIPT $GUI_ARGS

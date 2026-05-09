@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
 from PySide6.QtCore import Qt
 
 class LKGControlPanel(QMainWindow):
-    def __init__(self, monitor_index=1):
+    def __init__(self, monitor_index=1, calib_file=None):
         super().__init__()
         self.setWindowTitle(f"Looking Glass Go - Control Panel (Monitor {monitor_index})")
         self.setFixedWidth(520)
@@ -21,6 +21,7 @@ class LKGControlPanel(QMainWindow):
         self.udp_ip = "127.0.0.1"
         self.udp_port = 5000 + monitor_index
         self.sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        self.calib_file_arg = calib_file
         
         # Parameters
         self.focus = 0.5
@@ -100,9 +101,18 @@ class LKGControlPanel(QMainWindow):
         override_path = os.path.join(script_dir, "lkg_calibration.json")
         factory_path = self.discover_factory_calibration()
 
-        if factory_path:
+        specified = self.calib_file_arg and os.path.exists(self.calib_file_arg)
+        specified_is_override = specified and os.path.abspath(self.calib_file_arg) == os.path.abspath(override_path)
+
+        if specified and not specified_is_override:
+            calib_file = self.calib_file_arg
+            print(f"GUI: Using specified calibration: {calib_file}")
+        elif factory_path:
             calib_file = factory_path
             print(f"GUI: Using factory calibration: {factory_path}")
+        elif specified:
+            calib_file = self.calib_file_arg
+            print(f"GUI: Using specified fallback calibration: {calib_file}")
         else:
             calib_file = override_path
             print(f"GUI: Using fallback calibration: {calib_file}")
@@ -523,9 +533,10 @@ class LKGControlPanel(QMainWindow):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--monitor", type=int, default=1, help="Monitor index (1 or 2) to control")
+    parser.add_argument("--calib-file", help="Path to specific calibration file")
     args = parser.parse_args()
     
     app = QApplication(sys.argv)
-    window = LKGControlPanel(monitor_index=args.monitor)
+    window = LKGControlPanel(monitor_index=args.monitor, calib_file=args.calib_file)
     window.show()
     sys.exit(app.exec())

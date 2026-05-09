@@ -359,12 +359,18 @@ class LKGPlayer:
 
         factory_path = self.discover_factory_calibration()
 
-        if factory_path:
-            calib_file = factory_path
-            print(f"Using factory calibration: {factory_path}")
-        elif self.args.calib_file and os.path.exists(self.args.calib_file):
+        specified = self.args.calib_file and os.path.exists(self.args.calib_file)
+        specified_is_override = specified and os.path.abspath(self.args.calib_file) == os.path.abspath(override_path)
+
+        if specified and not specified_is_override:
             calib_file = self.args.calib_file
             print(f"Using specified calibration: {calib_file}")
+        elif factory_path:
+            calib_file = factory_path
+            print(f"Using factory calibration: {factory_path}")
+        elif specified:
+            calib_file = self.args.calib_file
+            print(f"Using specified fallback calibration: {calib_file}")
         else:
             calib_file = override_path
             print(f"Using fallback calibration: {calib_file}")
