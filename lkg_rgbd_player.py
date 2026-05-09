@@ -57,12 +57,31 @@ uniform float depthGamma;
 uniform float edgeFade;
 uniform float edgeLow;
 uniform float edgeHigh;
+uniform float depthSmooth;
+uniform vec2 texelSize;
 
 uniform int depthLoc; // 0=top, 1=bottom, 2=left, 3=right
 uniform int invView;
 uniform int flipSubp;
 uniform int invertDepth;
 uniform int testPattern;
+
+float readDepth(vec2 uv) {
+    float d = texture(texRGBD, uv).r;
+    if (invertDepth == 1) d = 1.0 - d;
+    return d;
+}
+
+float getSmoothDepth(vec2 uv) {
+    float c = readDepth(uv);
+    float l = readDepth(uv + vec2(-texelSize.x, 0.0));
+    float r = readDepth(uv + vec2( texelSize.x, 0.0));
+    float u = readDepth(uv + vec2(0.0, -texelSize.y));
+    float b = readDepth(uv + vec2(0.0,  texelSize.y));
+
+    float avg = (c * 4.0 + l + r + u + b) / 8.0;
+    return mix(c, avg, depthSmooth);
+}
 
 void main() {
     vec3 color;
@@ -117,13 +136,12 @@ void main() {
             depth_uv = vec2(TexCoord.x, sample_y * 0.5);
         }
         
-        float d = texture(texRGBD, depth_uv).r;
-        if (invertDepth == 1) {
-            d = 1.0 - d;
-        }
+        float d = getSmoothDepth(depth_uv);
 
         // --- Depth Remapping ---
-        d = clamp((d - depthNear) / max(depthFar - depthNear, 0.0001), 0.0, 1.0);
+        float nearVal = min(depthNear, depthFar - 0.001);
+        float farVal = max(depthFar, depthNear + 0.001);
+        d = clamp((d - nearVal) / max(farVal - nearVal, 0.0001), 0.0, 1.0);
         d = pow(d, depthGamma);
 
         // --- Edge Detection & Fading ---
@@ -160,14 +178,15 @@ class LKGPlayer:
         self.running = True
         self.calib = {}
         
-        # Real-time control parameters
         self.focus = args.focus
         self.depthiness = args.depthiness
         self.maxParallaxPx = args.max_parallax_px
         self.parallaxScale = 0.02
+        self.invView = args.inv_view
         self.depthNear = 0.05
         self.depthFar = 0.95
         self.depthGamma = 1.2
+        self.depthSmooth = 0.5
         self.edgeFade = 0.8
         self.edgeLow = 0.02
         self.edgeHigh = 0.10
@@ -233,6 +252,8 @@ class LKGPlayer:
                         self.depthGamma = float(msg['depthGamma'])
                     if 'edgeFade' in msg:
                         self.edgeFade = float(msg['edgeFade'])
+                    if 'depthSmooth' in msg:
+                        self.depthSmooth = float(msg['depthSmooth'])
                 except socket.timeout:
                     continue
                 except Exception as e:
@@ -455,9 +476,10 @@ class LKGPlayer:
         if is_static:
             img = cv2.imread(self.args.input)
             img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
-            frame_h, frame_w, _ = img.shape
+            self.frame_h, self.frame_w, _ = img.shape
             raw_frame = img.tobytes()
             fps = 30.0
+            self.parallaxScale = self.maxParallaxPx / float(self.frame_w)
         else:
             self.frame_w, self.frame_h, fps = self.get_video_info(self.args.input)
             print(f"Video resolution: {self.frame_w}x{self.frame_h} @ {fps:.2f} FPS")
@@ -529,6 +551,8 @@ class LKGPlayer:
             GL.glUniform1f(GL.glGetUniformLocation(self.shader_program, "depthNear"), self.depthNear)
             GL.glUniform1f(GL.glGetUniformLocation(self.shader_program, "depthFar"), self.depthFar)
             GL.glUniform1f(GL.glGetUniformLocation(self.shader_program, "depthGamma"), self.depthGamma)
+            GL.glUniform1f(GL.glGetUniformLocation(self.shader_program, "depthSmooth"), self.depthSmooth)
+            GL.glUniform2f(GL.glGetUniformLocation(self.shader_program, "texelSize"), 1.0/float(frame_w), 1.0/float(frame_h))
             GL.glUniform1f(GL.glGetUniformLocation(self.shader_program, "edgeFade"), self.edgeFade)
             GL.glUniform1f(GL.glGetUniformLocation(self.shader_program, "edgeLow"), self.edgeLow)
             GL.glUniform1f(GL.glGetUniformLocation(self.shader_program, "edgeHigh"), self.edgeHigh)
@@ -566,7 +590,7 @@ if __name__ == "__main__":
     parser.add_argument("--calib-file")
     parser.add_argument("--focus", type=float, default=0.5)
     parser.add_argument("--depthiness", type=float, default=1.0)
-    parser.add_argument("--max-parallax-px", type=float, default=24.0)
+    parser.add_argument("--max-parallax-px", type=float, default=2.5)
     parser.add_argument("--depth-loc", type=int, default=3) # 2=Left, 3=Right (ComfyUI outputs Depth on Right)
     parser.add_argument("--inv-view", type=int, default=1)
     parser.add_argument("--wait-trigger")
