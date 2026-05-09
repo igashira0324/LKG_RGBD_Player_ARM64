@@ -4,6 +4,7 @@ import json
 import socket
 import argparse
 import os
+import math
 from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
                              QSlider, QLabel, QComboBox, QPushButton, QDoubleSpinBox, QSpinBox)
 from PyQt6.QtCore import Qt
@@ -11,17 +12,20 @@ from PyQt6.QtCore import Qt
 class LKGControlPanel(QWidget):
     def __init__(self, monitor_index=1, calib_file=None, pipeline="rgbd"):
         super().__init__()
+        self.initializing = True
         self.monitor_index = monitor_index
         self.pipeline = pipeline
         self.udp_port = 5000 + monitor_index
         self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         
-        # Calibration / Common
+        # Calibration / Common (Defaults)
         self.pitch = 143.6
         self.tilt = -0.324
         self.center = 0.0
         self.flipSubp = 0
         self.invView = 1
+        self.screen_w = 1440.0
+        self.screen_h = 2560.0
         
         # RGBD Params
         self.focus = 0.5
@@ -41,18 +45,54 @@ class LKGControlPanel(QWidget):
         self.quiltViews = 66
         self.quiltAspect = 0.5625
         self.quiltFit = 0
-        self.flipRows = 0
+        self.flipRows = 1 # Match generate_test_quilt.py
         self.debugFixedView = -1
         self.quiltZoom = 1.0
         self.overscan = 0.0
         
+        self.load_calibration(calib_file)
         self.init_ui()
+        self.initializing = False
+
+    def get_calib_value(self, config, key, default):
+        v = config.get(key, default)
+        if isinstance(v, dict): return float(v.get("value", default))
+        return float(v)
+
+    def discover_factory_calibration(self):
+        for p in ["/media", "/mnt"]:
+            if not os.path.exists(p): continue
+            for root, dirs, files in os.walk(p):
+                if "visual.json" in files: return os.path.join(root, "visual.json")
+        return None
+
+    def load_calibration(self, calib_file):
+        if not calib_file:
+            calib_file = self.discover_factory_calibration()
+        
+        if calib_file and os.path.exists(calib_file):
+            print(f"[GUI-CALIB] Loading: {calib_file}")
+            try:
+                with open(calib_file, 'r', encoding='utf-8') as f:
+                    config = json.load(f)
+                raw_pitch = self.get_calib_value(config, "pitch", 49.818)
+                raw_slope = self.get_calib_value(config, "slope", -5.48)
+                raw_center = self.get_calib_value(config, "center", 0.157)
+                dpi = self.get_calib_value(config, "DPI", self.get_calib_value(config, "dpi", 491.0))
+                self.screen_w = self.get_calib_value(config, "screenW", 1440.0)
+                self.screen_h = self.get_calib_value(config, "screenH", 2560.0)
+                
+                screen_inches = math.sqrt(self.screen_w**2 + self.screen_h**2) / dpi
+                self.pitch = raw_pitch * screen_inches * math.cos(math.atan(1.0 / raw_slope))
+                self.tilt = self.screen_h / (self.screen_w * raw_slope)
+                self.center = raw_center
+            except Exception as e:
+                print(f"[GUI-CALIB] Error: {e}")
 
     def init_ui(self):
         self.setWindowTitle(f"LKG Go Control - Monitor {self.monitor_index}")
         layout = QVBoxLayout()
         
-        # Pipeline Info
         layout.addWidget(QLabel(f"Active Pipeline: {self.pipeline.upper()}"))
         
         # Common: Invert View
@@ -69,12 +109,11 @@ class LKGControlPanel(QWidget):
             
         # Calibration (Common)
         layout.addWidget(QLabel("--- Calibration ---"))
-        self.pitch_spin = self.add_spin(layout, "Pitch:", 100, 200, self.pitch, 0.1)
-        self.tilt_spin = self.add_spin(layout, "Tilt:", -1.0, 1.0, self.tilt, 0.001)
-        self.center_spin = self.add_spin(layout, "Center:", -1.0, 1.0, self.center, 0.001)
+        self.pitch_spin = self.add_spin(layout, "Pitch:", 50, 300, self.pitch, 0.001)
+        self.tilt_spin = self.add_spin(layout, "Tilt:", -5.0, 5.0, self.tilt, 0.0001)
+        self.center_spin = self.add_spin(layout, "Center:", -2.0, 2.0, self.center, 0.001)
         
         self.setLayout(layout)
-        self.update_params()
 
     def setup_rgbd_ui(self, layout):
         layout.addWidget(QLabel("--- RGBD Controls ---"))
@@ -92,7 +131,7 @@ class LKGControlPanel(QWidget):
         layout.addWidget(QLabel("--- Quilt Controls ---"))
         self.fixed_view_label = QLabel("Fixed View Index: OFF")
         self.fixed_view_slider = QSlider(Qt.Orientation.Horizontal)
-        self.fixed_view_slider.setRange(-1, 65)
+        self.fixed_view_slider.setRange(-1, self.quiltViews - 1)
         self.fixed_view_slider.setValue(-1)
         self.fixed_view_slider.valueChanged.connect(self.update_fixed_view)
         layout.addWidget(self.fixed_view_label)
@@ -104,8 +143,12 @@ class LKGControlPanel(QWidget):
         layout.addWidget(QLabel("Fit Mode:"))
         layout.addWidget(self.fit_combo)
         
-        self.flip_rows_btn = QPushButton("FLIP ROWS: OFF")
+        self.zoom_slider = self.add_slider(layout, "Quilt Zoom:", 50, 200, int(self.quiltZoom*100))
+        self.overscan_slider = self.add_slider(layout, "Overscan:", 0, 100, int(self.overscan*100))
+        
+        self.flip_rows_btn = QPushButton("FLIP ROWS: ON")
         self.flip_rows_btn.setCheckable(True)
+        self.flip_rows_btn.setChecked(True)
         self.flip_rows_btn.clicked.connect(self.update_params)
         layout.addWidget(self.flip_rows_btn)
 
@@ -143,6 +186,8 @@ class LKGControlPanel(QWidget):
         self.update_params()
 
     def update_params(self):
+        if getattr(self, "initializing", False): return
+        
         msg = {
             "pipeline": self.pipeline,
             "invView": self.invView,
@@ -156,24 +201,19 @@ class LKGControlPanel(QWidget):
             msg.update({
                 "quiltCols": self.quiltCols,
                 "quiltRows": self.quiltRows,
+                "quiltViews": self.quiltViews,
                 "quiltAspect": self.quiltAspect,
                 "quiltFit": self.fit_combo.currentIndex(),
                 "flipRows": 1 if self.flip_rows_btn.isChecked() else 0,
                 "debugFixedView": self.fixed_view_slider.value(),
-                "quiltZoom": self.quiltZoom,
-                "overscan": self.overscan
+                "quiltZoom": self.zoom_slider.value() / 100.0,
+                "overscan": self.overscan_slider.value() / 100.0
             })
         else:
             msg.update({
                 "focus": self.focus_slider.value() / 100.0,
                 "depthiness": self.depth_slider.value() / 100.0,
                 "maxParallaxPx": self.parallax_slider.value() / 10.0,
-                "depthContrast": self.depthContrast,
-                "depthGamma": self.depthGamma,
-                "depthSmooth": self.depthSmooth,
-                "edgeFade": self.edgeFade,
-                "depthLoc": self.depthLoc,
-                "invertDepth": self.invertDepth,
                 "debugMode": self.debug_combo.currentIndex()
             })
             
@@ -184,8 +224,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--monitor", type=int, default=1)
     parser.add_argument("--pipeline", default="rgbd")
+    parser.add_argument("--calib-file", default=None)
     args = parser.parse_args()
     app = QApplication(sys.argv)
-    win = LKGControlPanel(monitor_index=args.monitor, pipeline=args.pipeline)
+    win = LKGControlPanel(monitor_index=args.monitor, calib_file=args.calib_file, pipeline=args.pipeline)
     win.show()
     sys.exit(app.exec())

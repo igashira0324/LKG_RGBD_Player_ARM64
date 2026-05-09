@@ -8,6 +8,7 @@ import threading
 import argparse
 import subprocess
 import re
+import math
 from dataclasses import dataclass
 
 import numpy as np
@@ -24,7 +25,7 @@ class QuiltConfig:
     aspect: float = 0.5625
     source: str = "go-default"
     fit: int = 0  # 0=stretch, 1=contain, 2=cover
-    flip_rows: int = 0
+    flip_rows: int = 1 # Default to 1 for generate_test_quilt.py compatibility
     fixed_view: int = -1
     zoom: float = 1.0
     overscan: float = 0.0
@@ -57,7 +58,6 @@ void main() {
 }
 """
 
-# Phase 2 Stable: RGBD DIBR Shader
 FRAGMENT_SHADER = """
 #version 330 core
 out vec4 FragColor;
@@ -141,6 +141,7 @@ void main() {
         float sample_y = 1.0 - TexCoord.y;
         float r_min = 0.0, r_max = 1.0;
 
+        // 0=Top, 1=Bottom, 2=Left, 3=Right
         if (depthLoc == 2) { depth_uv = vec2(TexCoord.x*0.5, sample_y); rgb_uv = vec2(0.5+TexCoord.x*0.5, sample_y); r_min=0.5; }
         else if (depthLoc == 3) { rgb_uv = vec2(TexCoord.x*0.5, sample_y); depth_uv = vec2(0.5+TexCoord.x*0.5, sample_y); r_max=0.5; }
         else if (depthLoc == 0) { depth_uv = vec2(TexCoord.x, 0.5+sample_y*0.5); rgb_uv = vec2(TexCoord.x, sample_y*0.5); }
@@ -168,7 +169,6 @@ void main() {
 }
 """
 
-# Phase 3-A: Minimal Quilt Shader
 QUILT_FRAGMENT_SHADER = """
 #version 330 core
 out vec4 FragColor;
@@ -219,13 +219,11 @@ void main() {
         
         vec2 localUV = TexCoord;
         
-        // Apply Zoom & Overscan
         float totalZoom = quiltZoom * (1.0 + overscan);
         if (totalZoom != 1.0) {
             localUV = (localUV - 0.5) / totalZoom + 0.5;
         }
 
-        // Fit logic
         if (quiltFit == 1) { // Contain
             float s = (inputAspect / quiltAspect);
             if (s > 1.0) localUV.y = (localUV.y - 0.5) / s + 0.5;
@@ -236,13 +234,11 @@ void main() {
             else localUV.y = (localUV.y - 0.5) * s + 0.5;
         }
         
-        // Debug border check
         if (localUV.x < 0.0 || localUV.x > 1.0 || localUV.y < 0.0 || localUV.y > 1.0) {
             if (i == 0) color.r = 0.0; else if (i == 1) color.g = 0.0; else color.b = 0.0;
             continue;
         }
 
-        // Bleeding protection
         vec2 texSize = vec2(textureSize(texQuilt, 0));
         vec2 tileSize = texSize / vec2(float(quiltCols), float(quiltRows));
         localUV = clamp(localUV, 0.5 / tileSize, 1.0 - 0.5 / tileSize);
@@ -261,7 +257,7 @@ class LKGPlayer:
         self.running = True
         self.pipeline = args.pipeline
         
-        # Calibration
+        # Calibration Defaults
         self.pitch = 143.6
         self.tilt = -0.324
         self.center = 0.0
@@ -289,7 +285,7 @@ class LKGPlayer:
         self.debugMode = 0
         self.invView = args.inv_view
         
-        # Quilt Config initialization
+        # Quilt Config
         self.quilt_cfg = parse_quilt_from_filename(args.input)
         self.apply_cli_quilt_args(args)
         
@@ -298,40 +294,65 @@ class LKGPlayer:
         self.start_udp_listener()
 
     def apply_cli_quilt_args(self, args):
-        if args.quilt_cols: self.quilt_cfg.cols = args.quilt_cols; self.quilt_cfg.source = "cli"
-        if args.quilt_rows: self.quilt_cfg.rows = args.quilt_rows; self.quilt_cfg.source = "cli"
-        self.quilt_cfg.views = self.quilt_cfg.cols * self.quilt_cfg.rows
-        if args.quilt_aspect: self.quilt_cfg.aspect = args.quilt_aspect; self.quilt_cfg.source = "cli"
+        if args.quilt_cols is not None: self.quilt_cfg.cols = args.quilt_cols; self.quilt_cfg.source = "cli"
+        if args.quilt_rows is not None: self.quilt_cfg.rows = args.quilt_rows; self.quilt_cfg.source = "cli"
+        
+        if args.quilt_views is not None:
+            self.quilt_cfg.views = args.quilt_views
+            self.quilt_cfg.source = "cli"
+        else:
+            self.quilt_cfg.views = self.quilt_cfg.cols * self.quilt_cfg.rows
+            
+        if args.quilt_aspect is not None: self.quilt_cfg.aspect = args.quilt_aspect; self.quilt_cfg.source = "cli"
+        
+        FIT_MAP = {"stretch": 0, "contain": 1, "cover": 2}
+        self.quilt_cfg.fit = FIT_MAP.get(args.quilt_fit, 0)
+        self.quilt_cfg.zoom = args.quilt_zoom
+        self.quilt_cfg.overscan = args.overscan
+        self.quilt_cfg.flip_rows = 1 if args.quilt_flip_rows else self.quilt_cfg.flip_rows
         self.quilt_cfg.fixed_view = args.debug_fixed_view
+
+    def get_calib_value(self, config, key, default):
+        v = config.get(key, default)
+        if isinstance(v, dict): return float(v.get("value", default))
+        return float(v)
 
     def load_calibration(self):
         calib_file = self.args.calib_file or self.discover_factory_calibration()
+        
         if not calib_file or not os.path.exists(calib_file):
-            print("No calibration found, using defaults.")
-            self.subp = self.pitch / (self.screen_w * 3.0)
-            return
-
-        try:
-            with open(calib_file, 'r') as f:
+            print("[CALIB] No factory calibration found, using built-in Go defaults.")
+            raw_pitch = 49.818
+            raw_slope = -5.48
+            raw_center = 0.157
+            dpi = 491.0
+            screen_w = 1440.0
+            screen_h = 2560.0
+        else:
+            print(f"[CALIB] Using calibration: {calib_file}")
+            with open(calib_file, 'r', encoding='utf-8') as f:
                 config = json.load(f)
             
-            # Calibration logic from Phase 2
-            raw_pitch = float(config.get("pitch", {}).get("value", 80.7337))
-            raw_slope = float(config.get("slope", {}).get("value", -6.6259))
-            raw_center = float(config.get("center", {}).get("value", 0.6133))
-            dpi = float(config.get("dpi", {}).get("value", 491.0))
-            
-            self.pitch = raw_pitch * (1440.0 / dpi)
-            self.tilt = raw_slope * (1440.0 / 2560.0)
-            self.center = raw_center
-            self.subp = 1.0 / (self.screen_w * 3.0)
-            
-            # Apply Device Overrides if visual.json isn't enough
-            serial = config.get("serial", "default")
-            print(f"Loaded calibration for Serial: {serial}")
-            self.update_parallax_scale()
-        except Exception as e:
-            print(f"Calibration error: {e}")
+            raw_pitch = self.get_calib_value(config, "pitch", 49.818)
+            raw_slope = self.get_calib_value(config, "slope", -5.48)
+            raw_center = self.get_calib_value(config, "center", 0.157)
+            dpi = self.get_calib_value(config, "DPI", self.get_calib_value(config, "dpi", 491.0))
+            screen_w = self.get_calib_value(config, "screenW", self.get_calib_value(config, "screenWidth", 1440.0))
+            screen_h = self.get_calib_value(config, "screenH", self.get_calib_value(config, "screenHeight", 2560.0))
+
+        self.screen_w = screen_w
+        self.screen_h = screen_h
+        
+        # Stable formula from Phase 2
+        screen_inches = math.sqrt(screen_w**2 + screen_h**2) / dpi
+        self.pitch = raw_pitch * screen_inches * math.cos(math.atan(1.0 / raw_slope))
+        self.tilt = screen_h / (screen_w * raw_slope)
+        self.center = raw_center
+        self.subp = self.pitch / (3.0 * screen_w)
+        
+        print(f"[CALIB] raw pitch={raw_pitch:.6f} slope={raw_slope:.6f} center={raw_center:.6f} dpi={dpi:.2f}")
+        print(f"[CALIB] shader pitch={self.pitch:.6f} tilt={self.tilt:.6f} center={self.center:.6f} subp={self.subp:.8f}")
+        self.update_parallax_scale()
 
     def discover_factory_calibration(self):
         for p in ["/media", "/mnt"]:
@@ -341,7 +362,10 @@ class LKGPlayer:
         return None
 
     def update_parallax_scale(self):
-        self.parallaxScale = self.maxParallaxPx / self.screen_w
+        # SBS SBS width (0.5) correction
+        rgb_uv_width = 0.5 if self.depthLoc in (2, 3) else 1.0
+        self.parallaxScale = self.maxParallaxPx * rgb_uv_width / float(self.screen_w)
+        print(f"[PARALLAX] MaxParallax={self.maxParallaxPx:.2f} rgbUvWidth={rgb_uv_width:.2f} PScale={self.parallaxScale:.6f}")
 
     def start_udp_listener(self):
         def udp_loop():
@@ -360,7 +384,6 @@ class LKGPlayer:
         threading.Thread(target=udp_loop, daemon=True).start()
 
     def apply_udp_params(self, msg):
-        # Common
         if "invView" in msg: self.invView = int(msg["invView"])
         if "pitch" in msg: self.pitch = float(msg["pitch"])
         if "tilt" in msg: self.tilt = float(msg["tilt"])
@@ -369,7 +392,8 @@ class LKGPlayer:
         if self.pipeline == "quilt":
             if "quiltCols" in msg: self.quilt_cfg.cols = int(msg["quiltCols"])
             if "quiltRows" in msg: self.quilt_cfg.rows = int(msg["quiltRows"])
-            self.quilt_cfg.views = self.quilt_cfg.cols * self.quilt_cfg.rows
+            if "quiltViews" in msg: self.quilt_cfg.views = int(msg["quiltViews"])
+            else: self.quilt_cfg.views = self.quilt_cfg.cols * self.quilt_cfg.rows
             if "quiltAspect" in msg: self.quilt_cfg.aspect = float(msg["quiltAspect"])
             if "quiltFit" in msg: self.quilt_cfg.fit = int(msg["quiltFit"])
             if "flipRows" in msg: self.quilt_cfg.flip_rows = int(msg["flipRows"])
@@ -384,7 +408,7 @@ class LKGPlayer:
             if "depthGamma" in msg: self.depthGamma = float(msg["depthGamma"])
             if "depthSmooth" in msg: self.depthSmooth = float(msg["depthSmooth"])
             if "edgeFade" in msg: self.edgeFade = float(msg["edgeFade"])
-            if "depthLoc" in msg: self.depthLoc = int(msg["depthLoc"])
+            if "depthLoc" in msg: self.depthLoc = int(msg["depthLoc"]); self.update_parallax_scale()
             if "invertDepth" in msg: self.invertDepth = int(msg["invertDepth"])
             if "testPattern" in msg: self.testPattern = int(msg["testPattern"])
             if "debugMode" in msg: self.debugMode = int(msg["debugMode"])
@@ -397,17 +421,25 @@ class LKGPlayer:
             print(f"[{prefix}] QUILT: fit={c.fit} zoom={c.zoom:.2f} overscan={c.overscan:.2f} fixedView={c.fixed_view}")
         else:
             print(f"[{prefix}] RGBD: depthiness={self.depthiness:.2f} maxParallax={self.maxParallaxPx:.2f} focus={self.focus:.2f}")
-            print(f"[{prefix}] RGBD: near={self.depthNear:.2f} far={self.depthFar:.2f} smooth={self.depthSmooth:.2f} edgeFade={self.edgeFade:.2f}")
-        print(f"[{prefix}] CALIB: pitch={self.pitch:.4f} tilt={self.tilt:.4f} center={self.center:.4f} subp={self.subp:.6f}")
+        print(f"[{prefix}] CALIB: pitch={self.pitch:.4f} tilt={self.tilt:.4f} center={self.center:.4f} subp={self.subp:.8f}")
 
     def run(self):
         if not glfw.init(): return
         glfw.window_hint(glfw.VISIBLE, glfw.FALSE)
         
-        monitor = glfw.get_primary_monitor()
         monitors = glfw.get_monitors()
-        if self.args.monitor < len(monitors): monitor = monitors[self.args.monitor]
+        print(f"[GLFW] Detected {len(monitors)} monitors:")
+        for i, m in enumerate(monitors):
+            name = glfw.get_monitor_name(m).decode()
+            mode = glfw.get_video_mode(m)
+            print(f"  Monitor {i}: {name} ({mode.size.width}x{mode.size.height})")
+
+        monitor_idx = self.args.monitor
+        if monitor_idx >= len(monitors):
+            print(f"Warning: Monitor {monitor_idx} not found, falling back to primary.")
+            monitor_idx = 0
         
+        monitor = monitors[monitor_idx]
         mode = glfw.get_video_mode(monitor)
         self.screen_w, self.screen_h = mode.size.width, mode.size.height
         
@@ -415,25 +447,28 @@ class LKGPlayer:
             self.window = glfw.create_window(1280, 720, "LKG Player", None, None)
         else:
             glfw.window_hint(glfw.DECORATED, glfw.FALSE)
-            self.window = glfw.create_window(mode.size.width, mode.size.height, "LKG Player", monitor, None)
+            glfw.window_hint(glfw.AUTO_ICONIFY, glfw.FALSE)
+            self.window = glfw.create_window(self.screen_w, self.screen_h, "LKG Player", monitor, None)
         
+        if not self.window:
+            glfw.terminate()
+            return
+
         glfw.make_context_current(self.window)
         glfw.swap_interval(1)
+        glfw.show_window(self.window)
         
-        # Window / Framebuffer size check
         win_w, win_h = glfw.get_window_size(self.window)
         fb_w, fb_h = glfw.get_framebuffer_size(self.window)
         print(f"[WINDOW] window={win_w}x{win_h} framebuffer={fb_w}x{fb_h}")
         GL.glViewport(0, 0, fb_w, fb_h)
         
-        # Init Shaders
         vs = shaders.compileShader(VERTEX_SHADER, GL.GL_VERTEX_SHADER)
         fs_rgbd = shaders.compileShader(FRAGMENT_SHADER, GL.GL_FRAGMENT_SHADER)
         fs_quilt = shaders.compileShader(QUILT_FRAGMENT_SHADER, GL.GL_FRAGMENT_SHADER)
         self.prog_rgbd = shaders.compileProgram(vs, fs_rgbd)
         self.prog_quilt = shaders.compileProgram(vs, fs_quilt)
         
-        # Geometry (UV 0..1, no overscan in vertex data)
         quad = np.array([-1,-1,0,0, 1,-1,1,0, 1,1,1,1, -1,-1,0,0, 1,1,1,1, -1,1,0,1], dtype=np.float32)
         vao = GL.glGenVertexArrays(1); GL.glBindVertexArray(vao)
         vbo = GL.glGenBuffers(1); GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo)
@@ -441,16 +476,12 @@ class LKGPlayer:
         GL.glEnableVertexAttribArray(0); GL.glVertexAttribPointer(0, 2, GL.GL_FLOAT, False, 16, None)
         GL.glEnableVertexAttribArray(1); GL.glVertexAttribPointer(1, 2, GL.GL_FLOAT, False, 16, GL.ctypes.c_void_p(8))
         
-        # Detect static image vs video
         is_static = self.args.input.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff'))
-        
-        # Resolution detect
         probe = subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0",
             "-show_entries", "stream=width,height", "-of", "csv=p=0", self.args.input]).decode().strip()
         vw, vh = map(int, probe.split(','))
         print(f"[INPUT] file={os.path.basename(self.args.input)} resolution={vw}x{vh} static={is_static}")
         
-        # Texture setup
         tex = GL.glGenTextures(1)
         GL.glBindTexture(GL.GL_TEXTURE_2D, tex)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
@@ -459,7 +490,6 @@ class LKGPlayer:
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
         GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, 1)
         
-        # Load first frame / static image
         proc = None
         raw_frame = None
         if is_static:
@@ -472,14 +502,13 @@ class LKGPlayer:
             proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8)
         
         self.print_runtime_params("STARTUP")
-        self.update_parallax_scale()
         frame_size = vw * vh * 3
         
         while not glfw.window_should_close(self.window) and self.running:
             if not is_static and proc:
                 raw_frame = proc.stdout.read(frame_size)
                 if not raw_frame or len(raw_frame) < frame_size:
-                    if hasattr(self.args, 'loop') and self.args.loop:
+                    if self.args.loop:
                         proc.terminate()
                         proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8)
                         continue
@@ -489,12 +518,9 @@ class LKGPlayer:
             
             prog = self.prog_quilt if self.pipeline == "quilt" else self.prog_rgbd
             GL.glUseProgram(prog)
-            
-            # Bind texture to unit 0
             GL.glActiveTexture(GL.GL_TEXTURE0)
             GL.glBindTexture(GL.GL_TEXTURE_2D, tex)
             
-            # Common uniforms
             def set_f(name, val):
                 loc = GL.glGetUniformLocation(prog, name)
                 if loc != -1: GL.glUniform1f(loc, val)
@@ -540,6 +566,10 @@ if __name__ == "__main__":
     parser.add_argument("--quilt-views", type=int)
     parser.add_argument("--quilt-aspect", type=float)
     parser.add_argument("--debug-fixed-view", type=int, default=-1)
+    parser.add_argument("--quilt-fit", choices=["stretch", "contain", "cover"], default="stretch")
+    parser.add_argument("--quilt-zoom", type=float, default=1.0)
+    parser.add_argument("--overscan", type=float, default=0.0)
+    parser.add_argument("--quilt-flip-rows", action="store_true")
     parser.add_argument("--focus", type=float, default=0.5)
     parser.add_argument("--depthiness", type=float, default=1.0)
     parser.add_argument("--max-parallax-px", type=float, default=3.0)
