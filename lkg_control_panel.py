@@ -560,6 +560,11 @@ class LKGControlPanel(QMainWindow):
         self.quiltFit = self.fit_combo.currentIndex()
         self.update_params()
 
+    def toggle_flip_rows(self):
+        self.flipRows = 1 if self.flip_rows_btn.isChecked() else 0
+        self.flip_rows_btn.setText(f"FLIP ROWS: {'ON' if self.flipRows else 'OFF'}")
+        self.update_params()
+
     def update_params(self):
         try:
             self.focus = self.focus_slider.value() / 100.0
