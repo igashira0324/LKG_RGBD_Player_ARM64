@@ -3,6 +3,7 @@ import argparse
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -305,11 +306,11 @@ def main():
     if args.start > 0: cap.set(cv2.CAP_PROP_POS_MSEC, args.start * 1000.0)
     max_frames = int(round(args.seconds * fps)) if args.seconds > 0 else None
     
-    ok, frame = cap.read()
-    if not ok or frame is None:
+    ok, first_frame = cap.read()
+    if not ok or first_frame is None:
         raise RuntimeError(f"Failed to read first frame from video: {video_path}")
     
-    rgb0, dep0 = split_rgbd(frame, depth_loc)
+    rgb0, dep0 = split_rgbd(first_frame, depth_loc)
     rgb_h, rgb_w = rgb0.shape[:2]
     max_shift_px = rgb_w * max_shift_ratio * depthiness
     zero_depth = float(np.clip(args.zero_depth if args.zero_depth is not None else 0.5 + focus * 0.5, 0.0, 1.0))
@@ -323,10 +324,20 @@ def main():
     if args.reverse_views: offsets = offsets[::-1]
     
     processed = 0; pbar = tqdm(total=(max_frames if max_frames else total_frames), desc=f"Phase 3-B [{args.quality_preset}]")
+    ffmpeg_ret = 0
+    
     try:
         while True:
-            current = frame if processed == 0 else cap.read()[1]
-            if current is None or (max_frames and processed >= max_frames): break
+            if max_frames and processed >= max_frames:
+                break
+            
+            if processed == 0:
+                current = first_frame
+            else:
+                ok, current = cap.read()
+                if not ok or current is None:
+                    break
+            
             rgb, dep = split_rgbd(current, depth_loc)
             
             # 1. Depth Preprocessing
@@ -350,7 +361,7 @@ def main():
             try:
                 writer.stdin.write(quilt.tobytes())
             except BrokenPipeError:
-                raise RuntimeError("ffmpeg writer pipe closed unexpectedly")
+                break # ffmpeg closed unexpectedly
             
             # 4. Debug Save
             if args.debug_dir and processed == args.debug_frame:
@@ -368,11 +379,18 @@ def main():
         pbar.close(); cap.release()
         if writer.stdin:
             writer.stdin.close()
-        ret = writer.wait()
-        if ret != 0:
-            print(f"\n[ERROR] ffmpeg writer failed with return code {ret}")
+        ffmpeg_ret = writer.wait()
+
+    if ffmpeg_ret != 0:
+        raise RuntimeError(f"ffmpeg writer failed with return code {ffmpeg_ret}")
     
-    suggested = f"{output_path.stem}_qs{args.cols}x{args.rows}a0.5625{output_path.suffix}"
+    # Suggest filename without double suffix
+    qs_suffix = f"_qs{args.cols}x{args.rows}a0.5625"
+    if re.search(r"_qs\d+x\d+a[0-9]*\.?[0-9]+$", output_path.stem):
+        suggested = output_path.name
+    else:
+        suggested = f"{output_path.stem}{qs_suffix}{output_path.suffix}"
+
     print(f"\nPhase 3-B DONE")
     print(f"Output: {output_path}")
     print(f"Suggested filename for Player: {suggested}\n")
