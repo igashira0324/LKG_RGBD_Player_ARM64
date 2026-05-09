@@ -4,9 +4,9 @@ import json
 import socket
 import argparse
 import os
-from PyQt5.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
+from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout, 
                              QSlider, QLabel, QComboBox, QPushButton, QDoubleSpinBox, QSpinBox)
-from PyQt5.QtCore import Qt
+from PyQt6.QtCore import Qt
 
 class LKGControlPanel(QWidget):
     def __init__(self, monitor_index=1, calib_file=None, pipeline="rgbd"):
@@ -91,7 +91,7 @@ class LKGControlPanel(QWidget):
     def setup_quilt_ui(self, layout):
         layout.addWidget(QLabel("--- Quilt Controls ---"))
         self.fixed_view_label = QLabel("Fixed View Index: OFF")
-        self.fixed_view_slider = QSlider(Qt.Horizontal)
+        self.fixed_view_slider = QSlider(Qt.Orientation.Horizontal)
         self.fixed_view_slider.setRange(-1, 65)
         self.fixed_view_slider.setValue(-1)
         self.fixed_view_slider.valueChanged.connect(self.update_fixed_view)
@@ -111,7 +111,7 @@ class LKGControlPanel(QWidget):
 
     def add_slider(self, layout, label, min_v, max_v, init_v):
         l = QLabel(label)
-        s = QSlider(Qt.Horizontal)
+        s = QSlider(Qt.Orientation.Horizontal)
         s.setRange(min_v, max_v)
         s.setValue(init_v)
         s.valueChanged.connect(self.update_params)
