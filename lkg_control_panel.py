@@ -10,7 +10,7 @@ from PyQt6.QtWidgets import (QApplication, QWidget, QVBoxLayout, QHBoxLayout,
 from PyQt6.QtCore import Qt
 
 class LKGControlPanel(QWidget):
-    def __init__(self, args):
+    def __init__(self, args, unknown):
         super().__init__()
         self.initializing = True
         self.monitor_index = args.monitor
@@ -18,11 +18,10 @@ class LKGControlPanel(QWidget):
         self.udp_port = 5000 + args.monitor
         self.udp_socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         
-        # Calibration / Common (Defaults)
+        # Calibration / Common
         self.pitch = 143.6
         self.tilt = -0.324
         self.center = 0.0
-        self.flipSubp = 0
         self.invView = args.inv_view
         self.screen_w = 1440.0
         self.screen_h = 2560.0
@@ -31,16 +30,20 @@ class LKGControlPanel(QWidget):
         self.focus = args.focus
         self.depthiness = args.depthiness
         self.maxParallaxPx = args.max_parallax_px
+        self.depthContrast = 1.2
+        self.depthGamma = 1.2
+        self.depthSmooth = 0.5
+        self.edgeFade = 0.8
+        self.invertDepth = 0
+        self.depthLoc = args.depth_loc
         
-        # Quilt Params (Initial values for GUI sync, but will NOT be sent to Player)
-        self.quiltCols = args.quilt_cols
-        self.quiltRows = args.quilt_rows
+        # Quilt Params (Initial values for GUI sync)
         self.quiltViews = args.quilt_views or (args.quilt_cols * args.quilt_rows)
-        self.quiltAspect = args.quilt_aspect
-        self.quiltFit = 0 # Match Stretch
+        self.quiltFit = {"stretch": 0, "contain": 1, "cover": 2}.get(args.quilt_fit, 0)
         self.flipRows = 1 if args.quilt_flip_rows else 1 
         self.quiltZoom = args.quilt_zoom
         self.overscan = args.overscan
+        self.debugFixedView = args.debug_fixed_view
         
         self.load_calibration(args.calib_file)
         self.init_ui()
@@ -63,7 +66,6 @@ class LKGControlPanel(QWidget):
             calib_file = self.discover_factory_calibration()
         
         if calib_file and os.path.exists(calib_file):
-            print(f"[GUI-CALIB] Loading: {calib_file}")
             try:
                 with open(calib_file, 'r', encoding='utf-8') as f:
                     config = json.load(f)
@@ -99,11 +101,16 @@ class LKGControlPanel(QWidget):
         else:
             self.setup_quilt_ui(layout)
             
-        # Calibration (Common)
-        layout.addWidget(QLabel("--- Calibration ---"))
+        # Calibration (Separated for safety)
+        layout.addWidget(QLabel("--- Calibration (Click Apply to send) ---"))
         self.pitch_spin = self.add_spin(layout, "Pitch:", 50, 500, self.pitch, 0.001)
         self.tilt_spin = self.add_spin(layout, "Tilt:", -5.0, 5.0, self.tilt, 0.0001)
         self.center_spin = self.add_spin(layout, "Center:", -2.0, 2.0, self.center, 0.001)
+        
+        self.apply_calib_btn = QPushButton("APPLY CALIBRATION")
+        self.apply_calib_btn.setStyleSheet("background-color: #444; color: white; padding: 10px;")
+        self.apply_calib_btn.clicked.connect(self.send_calibration)
+        layout.addWidget(self.apply_calib_btn)
         
         self.setLayout(layout)
 
@@ -112,7 +119,16 @@ class LKGControlPanel(QWidget):
         self.focus_slider = self.add_slider(layout, "Focus:", 0, 100, int(self.focus*100))
         self.depth_slider = self.add_slider(layout, "Depthiness:", 0, 500, int(self.depthiness*100))
         self.parallax_slider = self.add_slider(layout, "Max Parallax:", 0, 100, int(self.maxParallaxPx*10))
+        self.contrast_slider = self.add_slider(layout, "Depth Contrast:", 50, 200, int(self.depthContrast*100))
+        self.gamma_slider = self.add_slider(layout, "Depth Gamma:", 50, 200, int(self.depthGamma*100))
+        self.smooth_slider = self.add_slider(layout, "Depth Smooth:", 0, 100, int(self.depthSmooth*100))
+        self.edge_slider = self.add_slider(layout, "Edge Fade:", 0, 100, int(self.edgeFade*100))
         
+        self.invert_depth_btn = QPushButton("INVERT DEPTH: OFF")
+        self.invert_depth_btn.setCheckable(True)
+        self.invert_depth_btn.clicked.connect(self.update_params)
+        layout.addWidget(self.invert_depth_btn)
+
         self.debug_combo = QComboBox()
         self.debug_combo.addItems(["Standard", "RGB Only", "Smooth Depth", "Raw Depth", "Parallax Mask", "Edge Mask"])
         self.debug_combo.currentIndexChanged.connect(self.update_params)
@@ -121,17 +137,17 @@ class LKGControlPanel(QWidget):
 
     def setup_quilt_ui(self, layout):
         layout.addWidget(QLabel("--- Quilt Controls ---"))
-        self.fixed_view_label = QLabel("Fixed View Index: OFF")
+        self.fixed_view_label = QLabel(f"Fixed View Index: {self.debugFixedView if self.debugFixedView >=0 else 'OFF'}")
         self.fixed_view_slider = QSlider(Qt.Orientation.Horizontal)
-        # Dynamic range based on views
         self.fixed_view_slider.setRange(-1, self.quiltViews - 1)
-        self.fixed_view_slider.setValue(-1)
+        self.fixed_view_slider.setValue(self.debugFixedView)
         self.fixed_view_slider.valueChanged.connect(self.update_fixed_view)
         layout.addWidget(self.fixed_view_label)
         layout.addWidget(self.fixed_view_slider)
         
         self.fit_combo = QComboBox()
         self.fit_combo.addItems(["Stretch", "Contain", "Cover"])
+        self.fit_combo.setCurrentIndex(self.quiltFit)
         self.fit_combo.currentIndexChanged.connect(self.update_params)
         layout.addWidget(QLabel("Fit Mode:"))
         layout.addWidget(self.fit_combo)
@@ -139,9 +155,9 @@ class LKGControlPanel(QWidget):
         self.zoom_slider = self.add_slider(layout, "Quilt Zoom:", 50, 200, int(self.quiltZoom*100))
         self.overscan_slider = self.add_slider(layout, "Overscan:", 0, 100, int(self.overscan*100))
         
-        self.flip_rows_btn = QPushButton("FLIP ROWS: ON")
+        self.flip_rows_btn = QPushButton(f"FLIP ROWS: {'ON' if self.flipRows else 'OFF'}")
         self.flip_rows_btn.setCheckable(True)
-        self.flip_rows_btn.setChecked(True)
+        self.flip_rows_btn.setChecked(bool(self.flipRows))
         self.flip_rows_btn.clicked.connect(self.update_params)
         layout.addWidget(self.flip_rows_btn)
 
@@ -163,7 +179,7 @@ class LKGControlPanel(QWidget):
         s.setValue(init_v)
         s.setSingleStep(step)
         s.setDecimals(4)
-        s.valueChanged.connect(self.update_params)
+        s.valueChanged.connect(lambda: None) # Don't auto-send
         row.addWidget(s)
         layout.addLayout(row)
         return s
@@ -178,32 +194,46 @@ class LKGControlPanel(QWidget):
         self.fixed_view_label.setText(f"Fixed View Index: {v}" if v >= 0 else "Fixed View Index: OFF")
         self.update_params()
 
+    def send_calibration(self):
+        msg = {
+            "pitch": self.pitch_spin.value(),
+            "tilt": self.tilt_spin.value(),
+            "center": self.center_spin.value()
+        }
+        data = json.dumps(msg).encode('utf-8')
+        self.udp_socket.sendto(data, ('127.0.0.1', self.udp_port))
+        print(f"[GUI] Sent Calibration: {msg}")
+
     def update_params(self):
         if getattr(self, "initializing", False): return
         
         msg = {
             "pipeline": self.pipeline,
-            "invView": self.invView,
-            "pitch": self.pitch_spin.value(),
-            "tilt": self.tilt_spin.value(),
-            "center": self.center_spin.value()
+            "invView": self.invView
         }
         
         if self.pipeline == "quilt":
-            # Note: We NO LONGER send cols/rows/views/aspect from GUI to prevent accidental overwriting
-            # The Player is the source of truth for Quilt layout (via filename or its own CLI).
+            self.flipRows = 1 if self.flip_rows_btn.isChecked() else 0
+            self.flip_rows_btn.setText(f"FLIP ROWS: {'ON' if self.flipRows else 'OFF'}")
             msg.update({
                 "quiltFit": self.fit_combo.currentIndex(),
-                "flipRows": 1 if self.flip_rows_btn.isChecked() else 0,
+                "flipRows": self.flipRows,
                 "debugFixedView": self.fixed_view_slider.value(),
                 "quiltZoom": self.zoom_slider.value() / 100.0,
                 "overscan": self.overscan_slider.value() / 100.0
             })
         else:
+            self.invert_depth_btn.setText(f"INVERT DEPTH: {'ON' if self.invert_depth_btn.isChecked() else 'OFF'}")
             msg.update({
                 "focus": self.focus_slider.value() / 100.0,
                 "depthiness": self.depth_slider.value() / 100.0,
-                "maxParallaxPx": self.parallax_slider.value() / 10.0
+                "maxParallaxPx": self.parallax_slider.value() / 10.0,
+                "depthContrast": self.contrast_slider.value() / 100.0,
+                "depthGamma": self.gamma_slider.value() / 100.0,
+                "depthSmooth": self.smooth_slider.value() / 100.0,
+                "edgeFade": self.edge_slider.value() / 100.0,
+                "invertDepth": 1 if self.invert_depth_btn.isChecked() else 0,
+                "debugMode": self.debug_combo.currentIndex()
             })
             
         data = json.dumps(msg).encode('utf-8')
@@ -215,8 +245,6 @@ if __name__ == "__main__":
     parser.add_argument("--pipeline", default="rgbd")
     parser.add_argument("--calib-file", default=None)
     parser.add_argument("--inv-view", type=int, default=1)
-    
-    # Add dummy arguments to match Player CLI for script compatibility
     parser.add_argument("--quilt-cols", type=int, default=11)
     parser.add_argument("--quilt-rows", type=int, default=6)
     parser.add_argument("--quilt-views", type=int, default=None)
@@ -229,9 +257,12 @@ if __name__ == "__main__":
     parser.add_argument("--focus", type=float, default=0.5)
     parser.add_argument("--depthiness", type=float, default=1.0)
     parser.add_argument("--max-parallax-px", type=float, default=3.0)
+    parser.add_argument("--depth-loc", type=int, default=3)
     
-    args = parser.parse_args()
+    args, unknown = parser.parse_known_args()
+    if unknown: print(f"[GUI] Ignored unknown args: {unknown}")
+    
     app = QApplication(sys.argv)
-    win = LKGControlPanel(args)
+    win = LKGControlPanel(args, unknown)
     win.show()
     sys.exit(app.exec())
