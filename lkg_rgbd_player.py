@@ -6,12 +6,13 @@ Uses windowed mode with automatic positioning on the LKG display.
 """
 
 import os
-import sys
+import cv2
 import json
-import time
+import socket
 import argparse
-import subprocess
+import sys
 import threading
+import getpass
 import socket
 import ctypes
 import numpy as np
@@ -19,7 +20,7 @@ from OpenGL import GL, GLU
 from OpenGL.GL import shaders
 import glfw
 import math
-import cv2
+import subprocess
 
 # --- Constants & Shaders ---
 
@@ -236,7 +237,6 @@ class LKGPlayer:
     def start_udp_listener(self):
         def udp_loop():
             sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             try:
                 sock.bind(('127.0.0.1', self.udp_port))
             except OSError as e:
@@ -285,7 +285,6 @@ class LKGPlayer:
                     if 'debugMode' in msg:
                         self.debugMode = int(msg['debugMode'])
                     
-                    # print(f"DEBUG: Received UDP focus={self.focus}") # Temporarily uncomment if still no reflection
                     self.print_runtime_params("UDP")
                 except socket.timeout:
                     continue
@@ -303,9 +302,12 @@ class LKGPlayer:
 
     def discover_factory_calibration(self):
         """Search for visual.json on mounted Looking Glass drives."""
-        search_paths = [
-            "/media", "/mnt", f"/run/media/{os.getlogin()}"
-        ]
+        search_paths = ["/media", "/mnt"]
+        try:
+            search_paths.append(f"/run/media/{getpass.getuser()}")
+        except Exception:
+            pass
+
         for base in search_paths:
             if not os.path.exists(base): continue
             try:
@@ -328,67 +330,69 @@ class LKGPlayer:
         return None
 
     def load_calibration(self):
-        calib_file = self.args.calib_file
-        
-        if not calib_file or "lkg_calibration.json" in calib_file:
-            # If no file provided OR it's the default override file, 
-            # try to discover the real factory calibration first.
-            factory_path = self.discover_factory_calibration()
-            if factory_path:
-                print(f"Discovered and prioritized factory calibration: {factory_path}")
-                calib_file = factory_path
-            elif not calib_file:
-                # Fallback to default path if nothing else
-                script_dir = os.path.dirname(os.path.abspath(__file__))
-                default_path = os.path.join(script_dir, "lkg_calibration.json")
-                if os.path.exists(default_path):
-                    calib_file = default_path
-        
-        if calib_file and os.path.exists(calib_file):
-            try:
-                with open(calib_file, 'r') as f:
-                    data = json.load(f)
-                    overrides = data.get('runtimeOverride', {})
-                    
-                    # Factory visual.json has values at root, my config has 'configValue'
-                    config = data.get('configValue', data)
-                    
-                    raw_pitch = float(config.get("pitch", {}).get("value", 49.818))
-                    raw_slope = float(config.get("slope", {}).get("value", -5.48))
-                    raw_center = float(config.get("center", {}).get("value", 0.157))
-                    screen_w = float(config.get("screenW", {}).get("value", 1440.0))
-                    screen_h = float(config.get("screenH", {}).get("value", 2560.0))
-                    dpi = float(config.get("DPI", {}).get("value", 491.0))
-                    
-                    self.invView = int(config.get("invView", {}).get("value", self.invView))
-                    self.flipSubp = int(config.get("flipSubp", {}).get("value", self.flipSubp))
-                    
-                    screen_inches = screen_w / dpi
-                    self.pitch = raw_pitch * screen_inches * math.cos(math.atan(1.0 / raw_slope))
-                    self.tilt = screen_h / (screen_w * raw_slope)
-                    self.center = raw_center
-                    self.subp = self.pitch / (3.0 * screen_w)
-                    
-                    # Apply runtime offsets
-                    self.pitch += float(overrides.get("pitchOffset", 0.0))
-                    self.tilt += float(overrides.get("tiltOffset", 0.0))
-                    self.center += float(overrides.get("centerOffset", 0.0))
+        def load_json_if_exists(path):
+            if path and os.path.exists(path):
+                with open(path, "r") as f:
+                    return json.load(f)
+            return {}
 
-                    self.maxParallaxPx = float(overrides.get("maxParallaxPx", self.maxParallaxPx))
-                    self.depthNear = float(overrides.get("depthNear", self.depthNear))
-                    self.depthFar = float(overrides.get("depthFar", self.depthFar))
-                    self.depthGamma = float(overrides.get("depthGamma", self.depthGamma))
-                    self.depthSmooth = float(overrides.get("depthSmooth", self.depthSmooth))
-                    self.edgeFade = float(overrides.get("edgeFade", self.edgeFade))
-                    
-                    print(f"Loaded calibration from {calib_file}")
-                    print(f"  Pitch={raw_pitch:.3f}, Slope={raw_slope:.3f}, Center={raw_center:.3f}, DPI={dpi}")
-                    print(f"  Shader: Pitch={self.pitch:.3f}, Tilt={self.tilt:.3f}, Center={self.center:.3f}, Subp={self.subp:.6f}")
-            except Exception as e:
-                print(f"Warning: Failed to load calibration: {e}")
+        def get_calib_value(config_dict, key, default_val):
+            v = config_dict.get(key, default_val)
+            if isinstance(v, dict):
+                return v.get("value", default_val)
+            return v
+
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        override_path = os.path.join(script_dir, "lkg_calibration.json")
+
+        factory_path = self.discover_factory_calibration()
+
+        if factory_path:
+            calib_file = factory_path
+            print(f"Using factory calibration: {factory_path}")
+        elif self.args.calib_file and os.path.exists(self.args.calib_file):
+            calib_file = self.args.calib_file
+            print(f"Using specified calibration: {calib_file}")
         else:
-            print("No calibration file found, using defaults")
-            print(f"  shader_pitch={self.pitch:.3f}, shader_tilt={self.tilt:.3f}, center={self.center:.3f}")
+            calib_file = override_path
+            print(f"Using fallback calibration: {calib_file}")
+
+        calib_data = load_json_if_exists(calib_file)
+        override_data = load_json_if_exists(override_path)
+
+        # Base calibration
+        config = calib_data.get('configValue', calib_data)
+        
+        raw_pitch = float(get_calib_value(config, "pitch", 49.818))
+        raw_slope = float(get_calib_value(config, "slope", -5.48))
+        raw_center = float(get_calib_value(config, "center", 0.157))
+        screen_w = float(get_calib_value(config, "screenW", 1440.0))
+        screen_h = float(get_calib_value(config, "screenH", 2560.0))
+        dpi = float(get_calib_value(config, "DPI", 491.0))
+        
+        self.invView = int(get_calib_value(config, "invView", self.invView))
+        self.flipSubp = int(get_calib_value(config, "flipSubp", self.flipSubp))
+        
+        screen_inches = screen_w / dpi
+        self.pitch = raw_pitch * screen_inches * math.cos(math.atan(1.0 / raw_slope))
+        self.tilt = screen_h / (screen_w * raw_slope)
+        self.center = raw_center
+        self.subp = self.pitch / (3.0 * screen_w)
+        
+        # Runtime Overrides
+        overrides = override_data.get('runtimeOverride', {})
+        self.pitch += float(overrides.get("pitchOffset", 0.0))
+        self.tilt += float(overrides.get("tiltOffset", 0.0))
+        self.center += float(overrides.get("centerOffset", 0.0))
+
+        self.maxParallaxPx = float(overrides.get("maxParallaxPx", self.maxParallaxPx))
+        self.depthNear = float(overrides.get("depthNear", self.depthNear))
+        self.depthFar = float(overrides.get("depthFar", self.depthFar))
+        self.depthGamma = float(overrides.get("depthGamma", self.depthGamma))
+        self.depthSmooth = float(overrides.get("depthSmooth", self.depthSmooth))
+        self.edgeFade = float(overrides.get("edgeFade", self.edgeFade))
+        
+        print(f"Loaded combined calibration. Overrides: {bool(overrides)}")
 
     def find_lkg_monitors(self):
         """Find all LKG Go monitors via xrandr."""

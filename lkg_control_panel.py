@@ -4,6 +4,7 @@ import socket
 import argparse
 import math
 import os
+import getpass
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QSlider, QLabel, QPushButton, QGroupBox,
                              QDoubleSpinBox, QComboBox)
@@ -55,52 +56,93 @@ class LKGControlPanel(QMainWindow):
         self.init_ui()
         self.apply_styles()
 
+    def discover_factory_calibration(self):
+        """Search for visual.json on mounted Looking Glass drives."""
+        search_paths = ["/media", "/mnt"]
+        try:
+            search_paths.append(f"/run/media/{getpass.getuser()}")
+        except Exception:
+            pass
+
+        for base in search_paths:
+            if not os.path.exists(base): continue
+            try:
+                for drive in os.listdir(base):
+                    drive_path = os.path.join(base, drive)
+                    full_path = os.path.join(drive_path, "LKG_calibration", "visual.json")
+                    if os.path.exists(full_path): return full_path
+                    full_path = os.path.join(drive_path, "visual.json")
+                    if os.path.exists(full_path): return full_path
+                    
+                    if os.path.isdir(drive_path):
+                        for sub in os.listdir(drive_path):
+                            full_path = os.path.join(drive_path, sub, "LKG_calibration", "visual.json")
+                            if os.path.exists(full_path): return full_path
+            except:
+                continue
+        return None
+
     def load_calibration(self):
         """Load calibration defaults and runtime overrides."""
-        calib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lkg_calibration.json")
-        if os.path.exists(calib_path):
-            try:
-                with open(calib_path, 'r') as f:
-                    data = json.load(f)
-                    
-                    # Read base config
-                    config = data.get('configValue', {})
-                    raw_pitch = float(config.get("pitch", {}).get("value", 49.818))
-                    raw_slope = float(config.get("slope", {}).get("value", -5.48))
-                    raw_center = float(config.get("center", {}).get("value", 0.157))
-                    screen_w = float(config.get("screenW", {}).get("value", 1440.0))
-                    screen_h = float(config.get("screenH", {}).get("value", 2560.0))
-                    dpi = float(config.get("DPI", {}).get("value", 491.0))
-                    
-                    self.invView = int(config.get("invView", {}).get("value", self.invView))
-                    self.flipSubp = int(config.get("flipSubp", {}).get("value", self.flipSubp))
-                    
-                    # Calculate shader bases
-                    screen_inches = screen_w / dpi
-                    self.base_pitch = raw_pitch * screen_inches * math.cos(math.atan(1.0 / raw_slope))
-                    self.base_tilt = screen_h / (screen_w * raw_slope)
-                    self.base_center = raw_center
-                    
-                    # Read overrides
-                    overrides = data.get('runtimeOverride', {})
-                    pitchOffset = float(overrides.get("pitchOffset", 0.0))
-                    tiltOffset = float(overrides.get("tiltOffset", 0.0))
-                    centerOffset = float(overrides.get("centerOffset", 0.0))
-                    
-                    # Set finals
-                    self.pitch = self.base_pitch + pitchOffset
-                    self.tilt = self.base_tilt + tiltOffset
-                    self.center = self.base_center + centerOffset
-                    
-                    # Read High Quality Overrides
-                    self.maxParallaxPx = float(overrides.get("maxParallaxPx", self.maxParallaxPx))
-                    self.depthNear = float(overrides.get("depthNear", self.depthNear))
-                    self.depthFar = float(overrides.get("depthFar", self.depthFar))
-                    self.depthGamma = float(overrides.get("depthGamma", self.depthGamma))
-                    self.depthSmooth = float(overrides.get("depthSmooth", self.depthSmooth))
-                    self.edgeFade = float(overrides.get("edgeFade", self.edgeFade))
-            except Exception as e:
-                print(f"Warning: Failed to load calibration: {e}")
+        def load_json_if_exists(path):
+            if path and os.path.exists(path):
+                with open(path, "r") as f:
+                    return json.load(f)
+            return {}
+
+        def get_calib_value(config_dict, key, default_val):
+            v = config_dict.get(key, default_val)
+            if isinstance(v, dict):
+                return v.get("value", default_val)
+            return v
+
+        script_dir = os.path.dirname(os.path.abspath(__file__))
+        override_path = os.path.join(script_dir, "lkg_calibration.json")
+        factory_path = self.discover_factory_calibration()
+
+        if factory_path:
+            calib_file = factory_path
+            print(f"GUI: Using factory calibration: {factory_path}")
+        else:
+            calib_file = override_path
+            print(f"GUI: Using fallback calibration: {calib_file}")
+
+        calib_data = load_json_if_exists(calib_file)
+        override_data = load_json_if_exists(override_path)
+
+        # Base config
+        config = calib_data.get('configValue', calib_data)
+        raw_pitch = float(get_calib_value(config, "pitch", 49.818))
+        raw_slope = float(get_calib_value(config, "slope", -5.48))
+        raw_center = float(get_calib_value(config, "center", 0.157))
+        screen_w = float(get_calib_value(config, "screenW", 1440.0))
+        screen_h = float(get_calib_value(config, "screenH", 2560.0))
+        dpi = float(get_calib_value(config, "DPI", 491.0))
+        
+        self.invView = int(get_calib_value(config, "invView", self.invView))
+        self.flipSubp = int(get_calib_value(config, "flipSubp", self.flipSubp))
+        
+        screen_inches = screen_w / dpi
+        self.base_pitch = raw_pitch * screen_inches * math.cos(math.atan(1.0 / raw_slope))
+        self.base_tilt = screen_h / (screen_w * raw_slope)
+        self.base_center = raw_center
+        
+        # Overrides
+        overrides = override_data.get('runtimeOverride', {})
+        pitchOffset = float(overrides.get("pitchOffset", 0.0))
+        tiltOffset = float(overrides.get("tiltOffset", 0.0))
+        centerOffset = float(overrides.get("centerOffset", 0.0))
+        
+        self.pitch = self.base_pitch + pitchOffset
+        self.tilt = self.base_tilt + tiltOffset
+        self.center = self.base_center + centerOffset
+        
+        self.maxParallaxPx = float(overrides.get("maxParallaxPx", self.maxParallaxPx))
+        self.depthNear = float(overrides.get("depthNear", self.depthNear))
+        self.depthFar = float(overrides.get("depthFar", self.depthFar))
+        self.depthGamma = float(overrides.get("depthGamma", self.depthGamma))
+        self.depthSmooth = float(overrides.get("depthSmooth", self.depthSmooth))
+        self.edgeFade = float(overrides.get("edgeFade", self.edgeFade))
                 
     def save_calibration(self):
         calib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lkg_calibration.json")
@@ -286,6 +328,7 @@ class LKGControlPanel(QMainWindow):
         self.center_spin.valueChanged.connect(self.update_params)
         center_row.addWidget(self.center_spin)
         calib_layout.addLayout(center_row)
+        layout.addWidget(calib_group)
         
         # Debug Mode
         debug_row = QHBoxLayout()
