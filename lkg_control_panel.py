@@ -47,7 +47,9 @@ class LKGControlPanel(QWidget):
             try:
                 with open(calib_file, 'r', encoding='utf-8') as f: config = json.load(f)
                 raw_pitch = self.get_calib_value(config, "pitch", 49.818); raw_slope = self.get_calib_value(config, "slope", -5.48)
-                raw_center = self.get_calib_value(config, "center", 0.157); dpi = self.get_calib_value(config, "DPI", 491.0)
+                raw_center = self.get_calib_value(config, "center", 0.157)
+                # Safe DPI fallback
+                dpi = self.get_calib_value(config, "DPI", self.get_calib_value(config, "dpi", 491.0))
                 self.screen_w = self.get_calib_value(config, "screenW", 1440.0); self.screen_h = self.get_calib_value(config, "screenH", 2560.0)
                 screen_inches = math.sqrt(self.screen_w**2 + self.screen_h**2) / dpi
                 self.pitch = raw_pitch * screen_inches * math.cos(math.atan(1.0 / raw_slope))
@@ -82,13 +84,9 @@ class LKGControlPanel(QWidget):
         self.gamma_slider = self.add_slider(layout, "Depth Gamma:", 50, 200, int(self.depthGamma*100))
         self.smooth_slider = self.add_slider(layout, "Depth Smooth:", 0, 100, int(self.depthSmooth*100))
         self.edge_slider = self.add_slider(layout, "Edge Fade:", 0, 100, int(self.edgeFade*100))
-        
-        self.depth_loc_combo = QComboBox()
-        self.depth_loc_combo.addItems(["Top", "Bottom", "Left", "Right"])
-        self.depth_loc_combo.setCurrentIndex(self.depthLoc)
-        self.depth_loc_combo.currentIndexChanged.connect(self.update_params)
+        self.depth_loc_combo = QComboBox(); self.depth_loc_combo.addItems(["Top", "Bottom", "Left", "Right"])
+        self.depth_loc_combo.setCurrentIndex(self.depthLoc); self.depth_loc_combo.currentIndexChanged.connect(self.update_params)
         layout.addWidget(QLabel("Depth Location:")); layout.addWidget(self.depth_loc_combo)
-        
         self.invert_depth_btn = QPushButton("INVERT DEPTH: OFF"); self.invert_depth_btn.setCheckable(True)
         self.invert_depth_btn.clicked.connect(self.update_params); layout.addWidget(self.invert_depth_btn)
         self.debug_combo = QComboBox(); self.debug_combo.addItems(["Standard", "RGB Only", "Smooth Depth", "Raw Depth", "Parallax Mask", "Edge Mask"])
@@ -136,7 +134,8 @@ class LKGControlPanel(QWidget):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--monitor", type=int, default=1); parser.add_argument("--pipeline", default="rgbd"); parser.add_argument("--calib-file", default=None); parser.add_argument("--inv-view", type=int, default=1)
-    parser.add_argument("--quilt-cols", type=int, default=11); parser.add_argument("--quilt-rows", type=int, default=6); parser.add_argument("--quilt-views", type=int, default=None); parser.add_argument("--quilt-aspect", type=float, default=0.5625); parser.add_argument("--debug-fixed-view", type=int, default=-1); parser.add_argument("--quilt-fit", default="stretch"); parser.add_argument("--quilt-zoom", type=float, default=1.0); parser.add_argument("--overscan", type=float, default=0.0); parser.add_argument("--quilt-flip-rows", action="store_true", default=True); parser.add_argument("--no-quilt-flip-rows", dest="quilt_flip_rows", action="store_false")
+    parser.add_argument("--quilt-cols", type=int, default=11); parser.add_argument("--quilt-rows", type=int, default=6); parser.add_argument("--quilt-views", type=int, default=None); parser.add_argument("--quilt-aspect", type=float, default=0.5625); parser.add_argument("--debug-fixed-view", type=int, default=-1); parser.add_argument("--quilt-fit", default="stretch"); parser.add_argument("--quilt-zoom", type=float, default=1.0); parser.add_argument("--overscan", type=float, default=0.0)
+    parser.add_argument("--quilt-flip-rows", action="store_true", default=True); parser.add_argument("--no-quilt-flip-rows", dest="quilt_flip_rows", action="store_false")
     parser.add_argument("--focus", type=float, default=0.5); parser.add_argument("--depthiness", type=float, default=1.0); parser.add_argument("--max-parallax-px", type=float, default=3.0); parser.add_argument("--depth-loc", type=int, default=3)
     args, unknown = parser.parse_known_args()
     app = QApplication(sys.argv); win = LKGControlPanel(args, unknown); win.show(); sys.exit(app.exec())
