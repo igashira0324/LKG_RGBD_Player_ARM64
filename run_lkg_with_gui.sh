@@ -2,7 +2,19 @@
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-VENV_PYTHON="$SCRIPT_DIR/lkg-env/bin/python3"
+VENV_DIR="$SCRIPT_DIR/lkg-env"
+
+# If venv not found in script dir, check parent (for export_repo case)
+if [ ! -d "$VENV_DIR" ]; then
+    VENV_DIR="$(cd "$SCRIPT_DIR/.." && pwd)/lkg-env"
+fi
+
+if [ ! -d "$VENV_DIR" ]; then
+    echo "Error: Virtual environment (lkg-env) not found."
+    echo "Please create it using: python3 -m venv lkg-env && source lkg-env/bin/activate && pip install opencv-python PyOpenGL PyOpenGL-accelerate glfw PyQt5"
+    exit 1
+fi
+VENV_PYTHON="$VENV_DIR/bin/python3"
 PLAYER_SCRIPT="$SCRIPT_DIR/lkg_rgbd_player.py"
 GUI_SCRIPT="$SCRIPT_DIR/lkg_control_panel.py"
 CALIB_FILE="$SCRIPT_DIR/lkg_calibration.json"

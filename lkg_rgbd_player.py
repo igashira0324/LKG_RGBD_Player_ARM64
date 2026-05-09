@@ -260,16 +260,17 @@ QUILT_FRAGMENT_SHADER = """
 out vec4 FragColor;
 in vec2 TexCoord;
 
-uniform float pitch;
-uniform float tilt;
-uniform float center;
-uniform float subp;
 uniform int flipSubp;
 uniform int invView;
+uniform int debugFixedView; // -1 for off, >=0 for fixed view index
+uniform int quiltFit;       // 0=stretch, 1=contain, 2=cover
 
 uniform sampler2D texQuilt;
 uniform int cols;
 uniform int rows;
+uniform float quiltAspect;
+uniform float inputAspect;
+
 
 void main() {
     vec3 color;
@@ -286,19 +287,39 @@ void main() {
         if (invView == 1) viewIndexNormalized = 1.0 - viewIndexNormalized;
 
         int totalViews = cols * rows;
-        // Map 0.0-1.0 to 0 to (totalViews-1)
-        float viewIndexFloat = viewIndexNormalized * float(totalViews - 1);
-        int currentView = int(viewIndexFloat + 0.5);
-        currentView = clamp(currentView, 0, totalViews - 1);
+        int currentView;
+        
+        if (debugFixedView >= 0) {
+            currentView = clamp(debugFixedView, 0, totalViews - 1);
+        } else {
+            float viewIndexFloat = viewIndexNormalized * float(totalViews - 1);
+            currentView = int(viewIndexFloat + 0.5);
+            currentView = clamp(currentView, 0, totalViews - 1);
+        }
         
         // Calculate tile coordinates (standard LKG Quilt: View 0 is bottom-left)
         int col = currentView % cols;
         int row = currentView / cols;
         
+        // --- Aspect Ratio Correction (Fit) ---
+        vec2 localUV = TexCoord;
+        if (quiltFit == 1) { // Contain
+            float s = (inputAspect / quiltAspect);
+            if (s > 1.0) localUV.y = (localUV.y - 0.5) / s + 0.5;
+            else localUV.x = (localUV.x - 0.5) * s + 0.5;
+        } else if (quiltFit == 2) { // Cover
+            float s = (inputAspect / quiltAspect);
+            if (s > 1.0) localUV.x = (localUV.x - 0.5) / s + 0.5;
+            else localUV.y = (localUV.y - 0.5) * s + 0.5;
+        }
+        
+        // Clamp localUV to avoid tile bleeding
+        localUV = clamp(localUV, 0.001, 0.999);
+        
         // Sample tile
         vec2 tileUV = vec2(
-            (float(col) + TexCoord.x) / float(cols),
-            (float(row) + TexCoord.y) / float(rows)
+            (float(col) + localUV.x) / float(cols),
+            (float(row) + localUV.y) / float(rows)
         );
         
         vec3 sampled = texture(texQuilt, tileUV).rgb;
@@ -308,6 +329,7 @@ void main() {
     }
     FragColor = vec4(color, 1.0);
 }
+
 
 """
 
@@ -348,10 +370,30 @@ class LKGPlayer:
         # Quilt Config
         self.quiltCols = args.quilt_cols
         self.quiltRows = args.quilt_rows
-        self.quiltTotalViews = args.quilt_views
-        self.quiltAspect = args.quilt_aspect
-        
+        # Auto-parse quilt settings from filename
+        self.parse_quilt_filename(args.input)
+
         self.quilt_gen = QuiltGenerator(cols=self.quiltCols, rows=self.quiltRows, quilt_res=4092)
+
+    def parse_quilt_filename(self, filename):
+        import re
+        # _qs{cols}x{rows}a{aspect}
+        m = re.search(r'_qs(\d+)x(\d+)a([0-9]*\.?[0-9]+)', filename)
+        if m:
+            self.quiltCols = int(m.group(1))
+            self.quiltRows = int(m.group(2))
+            self.quiltTotalViews = self.quiltCols * self.quiltRows
+            self.quiltAspect = float(m.group(3))
+            print(f"[QUILT] Parsed from filename: {self.quiltCols}x{self.quiltRows} aspect={self.quiltAspect}")
+            return
+            
+        # _qs{cols}x{rows}
+        m = re.search(r'_qs(\d+)x(\d+)', filename)
+        if m:
+            self.quiltCols = int(m.group(1))
+            self.quiltRows = int(m.group(2))
+            self.quiltTotalViews = self.quiltCols * self.quiltRows
+            print(f"[QUILT] Parsed layout: {self.quiltCols}x{self.quiltRows} (using default aspect {self.quiltAspect})")
 
 
 
@@ -458,8 +500,11 @@ class LKGPlayer:
 
     def print_runtime_params(self, prefix="Runtime"):
         print(f"[{prefix}] Pipeline={self.pipeline} Mode={self.debugMode} InvView={self.invView} DepthLoc={self.depthLoc}")
+        if self.pipeline in ("quilt", "quilt-gen"):
+            print(f"[{prefix}] QUILT: {self.quiltCols}x{self.quiltRows} Views={self.quiltTotalViews} Aspect={self.quiltAspect} Fit={self.quiltFit} FixedView={self.debugFixedView}")
         print(f"[{prefix}] Depthiness={self.depthiness:.2f} MaxParallax={self.maxParallaxPx:.2f} PScale={self.parallaxScale:.5f}")
         print(f"[{prefix}] Near={self.depthNear:.2f} Far={self.depthFar:.2f} Gamma={self.depthGamma:.2f} Smooth={self.depthSmooth:.2f} EdgeFade={self.edgeFade:.2f}")
+
 
 
 
@@ -910,6 +955,11 @@ class LKGPlayer:
             if pipeline_mode in ("quilt", "quilt-gen"):
                 set_uniform_int(target_shader, "cols", self.quiltCols)
                 set_uniform_int(target_shader, "rows", self.quiltRows)
+                set_uniform_float(target_shader, "quiltAspect", self.quiltAspect)
+                set_uniform_float(target_shader, "inputAspect", float(frame_w) / float(frame_h))
+                set_uniform_int(target_shader, "quiltFit", self.quiltFit)
+                set_uniform_int(target_shader, "debugFixedView", self.debugFixedView)
+
 
             else:
                 # Direct DIBR specific uniforms

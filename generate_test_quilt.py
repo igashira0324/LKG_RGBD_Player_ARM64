@@ -1,50 +1,61 @@
 import cv2
 import numpy as np
-import os
 
-def generate_test_quilt(cols=8, rows=6, tile_w=512, tile_h=512):
-    quilt_w = cols * tile_w
-    quilt_h = rows * tile_h
-    quilt = np.zeros((quilt_h, quilt_w, 3), dtype=np.uint8)
+def generate_test_quilt(cols=11, rows=6, res=4092):
+    # Calculate tile size
+    tw = res // cols
+    th = res // rows
     
-    total_views = cols * rows
+    # Create blank quilt
+    quilt = np.zeros((th * rows, tw * cols, 3), dtype=np.uint8)
     
-    for i in range(total_views):
-        # OpenGL/LKG convention: 0 is bottom-left
-        col = i % cols
-        row = i // cols
-        
-        # Tile coordinates (image space: 0,0 is top-left)
-        x = col * tile_w
-        y = (rows - 1 - row) * tile_h
-        
-        # Draw gradient background (Red to Blue across views)
-        t = i / (total_views - 1)
-        color = (
-            int((1.0 - t) * 255), # B
-            int(t * 128),         # G
-            int(t * 255)          # R
-        )
-        
-        tile = np.zeros((tile_h, tile_w, 3), dtype=np.uint8)
-        tile[:] = color
-        
-        # Add horizontal gradient to check left/right orientation
-        for gx in range(tile_w):
-            tile[:, gx] = tile[:, gx] * (0.5 + 0.5 * gx / tile_w)
+    for row in range(rows):
+        for col in range(cols):
+            view_index = row * cols + col
             
-        # Add view number
-        text = f"V:{i:02d}"
-        cv2.putText(tile, text, (tile_w//4, tile_h//2), cv2.FONT_HERSHEY_SIMPLEX, 3, (255, 255, 255), 5)
-        
-        # Add grid lines
-        cv2.rectangle(tile, (0, 0), (tile_w-1, tile_h-1), (255, 255, 255), 2)
-        
-        quilt[y:y+tile_h, x:x+tile_w] = tile
-        
-    output_path = "test_quilt_qs8x6.png"
-    cv2.imwrite(output_path, quilt)
-    print(f"Generated test quilt: {output_path} ({quilt_w}x{quilt_h})")
+            # Create tile
+            tile = np.zeros((th, tw, 3), dtype=np.uint8)
+            
+            # Background color gradient based on view index
+            hue = int(180 * view_index / (cols * rows))
+            tile_hsv = np.zeros((th, tw, 3), dtype=np.uint8)
+            tile_hsv[..., 0] = hue
+            tile_hsv[..., 1] = 200
+            tile_hsv[..., 2] = 50
+            tile_bgr = cv2.cvtColor(tile_hsv, cv2.COLOR_HSV2BGR)
+            tile[:] = tile_bgr
+            
+            # Draw view number
+            text = f"V:{view_index:02d}"
+            font = cv2.FONT_HERSHEY_SIMPLEX
+            font_scale = 2.0
+            thickness = 5
+            (text_w, text_h), _ = cv2.getTextSize(text, font, font_scale, thickness)
+            
+            # Center text
+            text_x = (tw - text_w) // 2
+            text_y = (th + text_h) // 2
+            
+            # Draw shadow
+            cv2.putText(tile, text, (text_x+3, text_y+3), font, font_scale, (0,0,0), thickness+2)
+            # Draw white text
+            cv2.putText(tile, text, (text_x, text_y), font, font_scale, (255,255,255), thickness)
+            
+            # Draw borders
+            cv2.rectangle(tile, (0, 0), (tw-1, th-1), (255, 255, 255), 2)
+            
+            # Place in quilt (View 0 is bottom-left in LKG Quilt standard)
+            # But OpenCV Y is top-down, so row 0 in quilt is TOP.
+            # LKG View 0 is bottom-left, View (rows-1)*cols is top-left.
+            # So LKG row 'r' is quilt row 'rows - 1 - r'
+            q_row = rows - 1 - row
+            quilt[q_row*th:(q_row+1)*th, col*tw:(col+1)*tw] = tile
+            
+    # Save with naming convention
+    aspect = 0.5625 # Go portrait
+    filename = f"test_quilt_qs{cols}x{rows}a{aspect}.png"
+    cv2.imwrite(filename, quilt)
+    print(f"Generated {filename} ({quilt.shape[1]}x{quilt.shape[0]})")
 
 if __name__ == "__main__":
     generate_test_quilt()

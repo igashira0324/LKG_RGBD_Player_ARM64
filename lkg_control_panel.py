@@ -41,8 +41,11 @@ class LKGControlPanel(QMainWindow):
         self.depthGamma = 1.2
         self.depthSmooth = 0.5
         self.edgeFade = 0.8
-        self.depthContrast = 1.2
+        self.invView = 0
+        self.debugFixedView = -1
+        self.quiltFit = 0
         self.pipeline = pipeline
+        self.depthContrast = 1.2
 
         self.quiltCols = 8
         self.quiltRows = 6
@@ -440,7 +443,24 @@ class LKGControlPanel(QMainWindow):
         ql_row.addWidget(self.q_aspect_spin)
         layout.addLayout(ql_row)
 
+        # Added UI: Fixed View Slider and Quilt Fit
+        fv_row = QHBoxLayout()
+        self.fixed_view_label = QLabel("Fixed View Index: OFF")
+        fv_row.addWidget(self.fixed_view_label)
+        self.fixed_view_slider = QSlider(Qt.Horizontal)
+        self.fixed_view_slider.setRange(-1, self.quiltViews - 1)
+        self.fixed_view_slider.setValue(self.debugFixedView)
+        self.fixed_view_slider.valueChanged.connect(self.update_fixed_view)
+        fv_row.addWidget(self.fixed_view_slider)
+        layout.addLayout(fv_row)
 
+        fit_row = QHBoxLayout()
+        fit_row.addWidget(QLabel("Quilt Fit:"))
+        self.fit_combo = QComboBox()
+        self.fit_combo.addItems(["Fill", "Fit", "Stretch"])
+        self.fit_combo.currentIndexChanged.connect(self.update_fit)
+        fit_row.addWidget(self.fit_combo)
+        layout.addLayout(fit_row)
         
         # Presets
         preset_row = QHBoxLayout()
@@ -522,6 +542,16 @@ class LKGControlPanel(QMainWindow):
         self.testPattern = 1 if self.test_btn.isChecked() else 0
         self.update_params()
 
+    def update_fixed_view(self):
+        self.debugFixedView = self.fixed_view_slider.value()
+        txt = f"Fixed View Index: {self.debugFixedView}" if self.debugFixedView >= 0 else "Fixed View Index: OFF"
+        self.fixed_view_label.setText(txt)
+        self.update_params()
+        
+    def update_fit(self):
+        self.quiltFit = self.fit_combo.currentIndex()
+        self.update_params()
+
     def update_params(self):
         try:
             self.focus = self.focus_slider.value() / 100.0
@@ -567,6 +597,8 @@ class LKGControlPanel(QMainWindow):
             "focus": self.focus,
             "depthiness": self.depthiness,
             "invView": self.invView,
+            "debugFixedView": self.debugFixedView,
+            "quiltFit": self.quiltFit,
             "depthLoc": self.depthLoc,
             "invertDepth": self.invertDepth,
             "testPattern": self.testPattern,
