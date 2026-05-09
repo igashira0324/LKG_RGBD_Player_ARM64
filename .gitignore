@@ -1,0 +1,7 @@
+debug_*/
+output/
+*.mp4
+*.mov
+*.avi
+*.mkv
+__pycache__/
