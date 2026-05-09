@@ -33,7 +33,7 @@ class LKGControlPanel(QMainWindow):
         self.debugMode = 0
         
         # High Quality Parameters
-        self.maxParallaxPx = 2.5
+        self.maxParallaxPx = 8.0
         self.depthNear = 0.05
         self.depthFar = 0.95
         self.depthGamma = 1.2
@@ -193,7 +193,7 @@ class LKGControlPanel(QMainWindow):
         self.depth_label = QLabel(f"Depthiness: {self.depthiness:.2f}")
         depthiness_row.addWidget(self.depth_label)
         self.depth_slider = QSlider(Qt.Horizontal)
-        self.depth_slider.setRange(0, 100)
+        self.depth_slider.setRange(0, 500)
         self.depth_slider.setValue(int(self.depthiness * 100))
         self.depth_slider.valueChanged.connect(self.update_params)
         depthiness_row.addWidget(self.depth_slider)

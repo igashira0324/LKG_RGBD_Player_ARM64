@@ -677,7 +677,7 @@ if __name__ == "__main__":
     parser.add_argument("--calib-file")
     parser.add_argument("--focus", type=float, default=0.5)
     parser.add_argument("--depthiness", type=float, default=1.0)
-    parser.add_argument("--max-parallax-px", type=float, default=2.5)
+    parser.add_argument("--max-parallax-px", type=float, default=8.0)
     parser.add_argument("--depth-loc", type=int, default=3) # 2=Left, 3=Right (ComfyUI outputs Depth on Right)
     parser.add_argument("--inv-view", type=int, default=1)
     parser.add_argument("--wait-trigger")
