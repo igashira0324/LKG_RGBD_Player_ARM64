@@ -1,0 +1,46 @@
+{
+  "configValue": {
+    "configVersion": "1.0",
+    "serial": "6B84A2750F37",
+    "pitch": {
+      "value": 49.81804275512695
+    },
+    "slope": {
+      "value": -5.480000019073486
+    },
+    "center": {
+      "value": 0.15700000524520874
+    },
+    "viewCone": {
+      "value": 40.0
+    },
+    "invView": {
+      "value": 1
+    },
+    "verticalAngle": {
+      "value": 0.0
+    },
+    "DPI": {
+      "value": 491.0
+    },
+    "screenW": {
+      "value": 1440.0
+    },
+    "screenH": {
+      "value": 2560.0
+    },
+    "flipImageX": {
+      "value": 0
+    },
+    "flipImageY": {
+      "value": 0
+    },
+    "flipSubp": {
+      "value": 0
+    },
+    "CellPatternMode": {
+      "value": 0
+    },
+    "_note": "DEFAULT VALUES - device-specific calibration preferred"
+  }
+}

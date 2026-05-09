@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Spatial Vision: RGBD & Looking Glass Go Tech Guide</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;700&family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-color: #050505;
+            --accent-cyan: #00f2ff;
+            --accent-magenta: #ff00e6;
+            --text-primary: #ffffff;
+            --text-secondary: #a0a0a0;
+            --card-bg: rgba(255, 255, 255, 0.05);
+            --glass-border: rgba(255, 255, 255, 0.1);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background-color: var(--bg-color);
+            color: var(--text-primary);
+            font-family: 'Inter', sans-serif;
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        h1, h2, h3 {
+            font-family: 'Outfit', sans-serif;
+            letter-spacing: 1px;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+        }
+
+        header {
+            text-align: center;
+            padding: 100px 0;
+            background: radial-gradient(circle at center, rgba(0, 242, 255, 0.15) 0%, transparent 70%);
+        }
+
+        .hero-title {
+            font-size: 4rem;
+            font-weight: 700;
+            background: linear-gradient(to right, var(--accent-cyan), var(--accent-magenta));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            margin-bottom: 20px;
+            text-transform: uppercase;
+        }
+
+        .hero-subtitle {
+            font-size: 1.2rem;
+            color: var(--text-secondary);
+            font-weight: 300;
+        }
+
+        section {
+            margin-bottom: 120px;
+            opacity: 0;
+            transform: translateY(30px);
+            transition: all 0.8s ease-out;
+        }
+
+        section.visible {
+            opacity: 1;
+            transform: translateY(0);
+        }
+
+        .glass-card {
+            background: var(--card-bg);
+            backdrop-filter: blur(10px);
+            border: 1px solid var(--glass-border);
+            border-radius: 20px;
+            padding: 40px;
+            margin-top: 30px;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .glass-card::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: -100%;
+            width: 100%;
+            height: 100%;
+            background: linear-gradient(90deg, transparent, rgba(255,255,255,0.05), transparent);
+            transition: 0.5s;
+        }
+
+        .glass-card:hover::before {
+            left: 100%;
+        }
+
+        h2 {
+            font-size: 2.5rem;
+            margin-bottom: 30px;
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+
+        h2::before {
+            content: '';
+            width: 40px;
+            height: 4px;
+            background: var(--accent-cyan);
+            border-radius: 2px;
+        }
+
+        p {
+            margin-bottom: 20px;
+            color: var(--text-secondary);
+            font-size: 1.1rem;
+        }
+
+        .infographic-container {
+            width: 100%;
+            border-radius: 15px;
+            overflow: hidden;
+            border: 1px solid var(--glass-border);
+            margin: 40px 0;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5);
+        }
+
+        .infographic-container img {
+            width: 100%;
+            display: block;
+        }
+
+        /* SVG Animations */
+        .svg-anim {
+            width: 100%;
+            max-width: 600px;
+            margin: 40px auto;
+            display: block;
+        }
+
+        .quilt-grid {
+            fill: none;
+            stroke: var(--glass-border);
+            stroke-width: 1;
+        }
+
+        .view-tile {
+            fill: var(--accent-cyan);
+            opacity: 0;
+        }
+
+        @keyframes fillQuilt {
+            0% { opacity: 0; transform: scale(0.8); }
+            100% { opacity: 0.6; transform: scale(1); }
+        }
+
+        .parallax-line {
+            stroke: var(--accent-magenta);
+            stroke-dasharray: 100;
+            stroke-dashoffset: 100;
+            animation: dash 2s infinite linear;
+        }
+
+        @keyframes dash {
+            to { stroke-dashoffset: 0; }
+        }
+
+        .tech-list {
+            list-style: none;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 20px;
+            margin-top: 30px;
+        }
+
+        .tech-item {
+            padding: 20px;
+            border-left: 2px solid var(--accent-magenta);
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        .tech-item strong {
+            display: block;
+            color: var(--text-primary);
+            margin-bottom: 5px;
+        }
+
+        footer {
+            text-align: center;
+            padding: 60px;
+            border-top: 1px solid var(--glass-border);
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+        }
+
+        .highlight {
+            color: var(--accent-cyan);
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+
+    <header>
+        <div class="container">
+            <h1 class="hero-title">Spatial Vision</h1>
+            <p class="hero-subtitle">ComfyUI & Looking Glass Go: 空間映像制作の全工程</p>
+        </div>
+    </header>
+
+    <div class="container">
+        <!-- Section 1: Introduction -->
+        <section id="intro">
+            <h2>3D映像の民主化</h2>
+            <p>
+                従来の3D映像制作には、複雑なマルチカメラセットアップや、高価なステレオスコピック機器が必要でした。
+                しかし、現代のAI技術、特に<span class="highlight">Depth Estimation（深度推定）</span>の進化により、
+                一般的な2Dビデオから息を呑むような立体映像を生成することが可能になりました。
+            </p>
+            <div class="infographic-container">
+                <img src="lkg_tech_infographic_1778028485849.png" alt="LKG Tech Infographic">
+            </div>
+        </section>
+
+        <!-- Section 2: ComfyUI Pipeline -->
+        <section id="pipeline">
+            <h2>AIによる深度の魔術</h2>
+            <div class="glass-card">
+                <p>
+                    この展示では、<span class="highlight">ComfyUI</span>をベースとしたカスタムパイプラインを使用しています。
+                    最新の<span class="highlight">Video Depth Anything (V3)</span>モデルが、映像の1フレームごとに数ミリメートル単位の
+                    正確な距離情報を計算し、2D映像に「空間の奥行き」を与えます。
+                </p>
+                <div class="tech-list">
+                    <div class="tech-item">
+                        <strong>Model</strong>
+                        DA3-Large (Depth Anything V3)
+                    </div>
+                    <div class="tech-item">
+                        <strong>Architecture</strong>
+                        Vision Transformer (ViT)
+                    </div>
+                    <div class="tech-item">
+                        <strong>Output</strong>
+                        RGBD Unified (1152x1024)
+                    </div>
+                </div>
+            </div>
+            
+            <svg class="svg-anim" viewBox="0 0 400 200">
+                <!-- Simple Animation of Depth Extraction -->
+                <rect x="50" y="50" width="120" height="100" fill="#333" rx="5" />
+                <text x="60" y="40" fill="white" font-size="12">Original Video</text>
+                
+                <path d="M 180 100 L 220 100" stroke="var(--accent-cyan)" stroke-width="2" marker-end="url(#arrow)" />
+                
+                <rect x="230" y="50" width="120" height="100" fill="url(#depthGrad)" rx="5" />
+                <text x="240" y="40" fill="white" font-size="12">AI Depth Map</text>
+                
+                <defs>
+                    <linearGradient id="depthGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+                        <stop offset="0%" style="stop-color:#000;stop-opacity:1" />
+                        <stop offset="100%" style="stop-color:#fff;stop-opacity:1" />
+                    </linearGradient>
+                    <marker id="arrow" markerWidth="10" markerHeight="10" refX="5" refY="5" orient="auto">
+                        <path d="M 0 0 L 10 5 L 0 10 z" fill="var(--accent-cyan)" />
+                    </marker>
+                </defs>
+            </svg>
+        </section>
+
+        <!-- Section 3: The Quilt -->
+        <section id="quilt">
+            <h2>ライトフィールド・エンコーディング</h2>
+            <p>
+                Looking Glass Goは、<span class="highlight">Quilt（キルト）</span>と呼ばれる特殊な格子状の映像形式を読み込みます。
+                AIが生成した1枚のRGBD画像から、計算によって異なる角度から見た「66個の視点」を瞬時に合成します。
+            </p>
+            <div class="glass-card">
+                <h3>Backward Warping アニメーション</h3>
+                <p>
+                    深度情報に基づいて、ピクセルを左右に微妙にズラす（視差を与える）ことで、
+                    あたかもそこに空間が存在するかのような視覚効果を生み出します。
+                </p>
+                <svg class="svg-anim" viewBox="0 0 400 250">
+                    <!-- Quilt Grid Animation -->
+                    <g class="quilt-grid">
+                        <line x1="50" y1="50" x2="350" y2="50" />
+                        <line x1="50" y1="100" x2="350" y2="100" />
+                        <line x1="50" y1="150" x2="350" y2="150" />
+                        <line x1="50" y1="200" x2="350" y2="200" />
+                        <line x1="50" y1="50" x2="50" y2="200" />
+                        <line x1="110" y1="50" x2="110" y2="200" />
+                        <line x1="170" y1="50" x2="170" y2="200" />
+                        <line x1="230" y1="50" x2="230" y2="200" />
+                        <line x1="290" y1="50" x2="290" y2="200" />
+                        <line x1="350" y1="50" x2="350" y2="200" />
+                    </g>
+                    <!-- Filling Tiles -->
+                    <rect class="view-tile" x="55" y="155" width="50" height="40" style="animation: fillQuilt 2s infinite 0.1s;" />
+                    <rect class="view-tile" x="115" y="155" width="50" height="40" style="animation: fillQuilt 2s infinite 0.2s;" />
+                    <rect class="view-tile" x="175" y="155" width="50" height="40" style="animation: fillQuilt 2s infinite 0.3s;" />
+                    <rect class="view-tile" x="235" y="155" width="50" height="40" style="animation: fillQuilt 2s infinite 0.4s;" />
+                    <rect class="view-tile" x="295" y="155" width="50" height="40" style="animation: fillQuilt 2s infinite 0.5s;" />
+                    <text x="50" y="230" fill="var(--accent-magenta)" font-size="10">66 Independent Perspectives (11x6 Grid)</text>
+                </svg>
+            </div>
+        </section>
+
+        <!-- Section 4: Hardware -->
+        <section id="hardware">
+            <h2>Exhibition Power: DGX SPARK</h2>
+            <p>
+                この驚異的な空間体験を支えるのは、NVIDIAの最新アーキテクチャ<span class="highlight">GB10 (Grace Blackwell)</span>を搭載した
+                <span class="highlight">DGX SPARK</span>システムです。
+            </p>
+            <div class="glass-card">
+                <ul class="tech-list">
+                    <div class="tech-item">
+                        <strong>Compute</strong>
+                        NVIDIA GB10 (124GB VRAM)
+                    </div>
+                    <div class="tech-item">
+                        <strong>OS</strong>
+                        Ubuntu 22.04 LTS (ARM64)
+                    </div>
+                    <div class="tech-item">
+                        <strong>Sync</strong>
+                        Sub-frame Multi-Display Triggering
+                    </div>
+                </ul>
+            </div>
+        </section>
+
+        <!-- Section 5: Technical Specs & Constraints -->
+        <section id="specs">
+            <h2>Technical Specifications</h2>
+            <div class="glass-card">
+                <p>
+                    安定した立体映像の生成と展示運用のため、以下の技術的制約を設けています。
+                </p>
+                <div class="tech-list">
+                    <div class="tech-item">
+                        <strong>推奨動画秒数</strong>
+                        15s - 30s (最大 90s)
+                    </div>
+                    <div class="tech-item">
+                        <strong>出力解像度</strong>
+                        1152x1024 (Unified RGBD)
+                    </div>
+                    <div class="tech-item">
+                        <strong>生成モデル</strong>
+                        Depth Anything V3 (Large/Base)
+                    </div>
+                    <div class="tech-item">
+                        <strong>同時再生</strong>
+                        2x Looking Glass Go (Sync)
+                    </div>
+                </div>
+                <p style="font-size: 0.9rem; margin-top: 20px; border-top: 1px solid var(--glass-border); padding-top: 10px;">
+                    ※ 90秒を超える動画生成は、システムメモリの枯渇によるハングアップのリスクが高まるため、分割生成を推奨します。
+                </p>
+            </div>
+        </section>
+    </div>
+
+    <footer>
+        <p>&copy; 2026 AI PhotoBooth Exhibition. Powered by Antigravity AI.</p>
+    </footer>
+
+    <script>
+        // Reveal sections on scroll
+        const observerOptions = {
+            threshold: 0.1
+        };
+
+        const observer = new IntersectionObserver((entries) => {
+            entries.forEach(entry => {
+                if (entry.isIntersecting) {
+                    entry.target.classList.add('visible');
+                }
+            });
+        }, observerOptions);
+
+        document.querySelectorAll('section').forEach(section => {
+            observer.observe(section);
+        });
+    </script>
+</body>
+</html>
