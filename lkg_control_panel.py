@@ -137,7 +137,10 @@ class LKGControlPanel(QMainWindow):
         self.base_tilt = screen_h / (screen_w * raw_slope)
         self.base_center = raw_center
         
-        self.serial = str(get_calib_value(config, "serial", "default"))
+        serial = str(get_calib_value(config, "serial", "")).strip()
+        if not serial:
+            serial = os.path.splitext(os.path.basename(calib_file))[0]
+        self.serial = serial or "default"
         
         # Overrides
         common_overrides = override_data.get('runtimeOverride', {})
@@ -172,6 +175,10 @@ class LKGControlPanel(QMainWindow):
         common["depthGamma"] = self.depthGamma
         common["depthSmooth"] = self.depthSmooth
         common["edgeFade"] = self.edgeFade
+        
+        # Remove legacy common offsets to avoid collisions in multi-device setups
+        for k in ("pitchOffset", "tiltOffset", "centerOffset"):
+            common.pop(k, None)
         
         device_overrides = data.setdefault("deviceOverride", {})
         dev = device_overrides.setdefault(self.serial, {})

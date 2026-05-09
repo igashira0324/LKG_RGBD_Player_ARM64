@@ -17,8 +17,11 @@ NVIDIA DGX SPARK (ARM64) 環境において、Looking Glass Go をスタンド�
 **自動変換**: 読み込まれた `raw pitch` / `slope` は、光学計算に基づきシェーダー用の `shader pitch` / `tilt` へ自動変換されます。
 
 ### B. 実行時オーバーライド (Runtime Overrides)
-- **ファイル**: `lkg_calibration.json` の `runtimeOverride` セクション。
-- **用途**: GUI（コントロールパネル）で操作した `Pitch Offset` や `Max Parallax` などの微調整値がここに保存され、次回起動時に自動適用されます。
+
+- **ファイル**: `lkg_calibration.json`
+- **共通設定 (`runtimeOverride`)**: `Max Parallax` や `Depthiness` など、コンテンツの見え方に関する全デバイス共通のパラメータ。
+- **デバイス固有設定 (`deviceOverride[serial]`)**: `Pitch Offset` / `Tilt Offset` / `Center Offset` など、ハードウェア個体差に起因する補正値。
+- **用途**: GUI（コントロールパネル）で操作した値が自動保存され、複数台接続時でも各デバイスに適した補正が自動適用されます。 serial 番号が不明な場合は、ファイル名がキーとして使用されます。
 
 ## 3. GUI コントロールパネルの仕様
 
