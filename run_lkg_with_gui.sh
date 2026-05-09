@@ -109,8 +109,6 @@ if [ "$GUI_ONLY" = true ]; then
     echo "Running in GUI ONLY mode (No Player)."
 else
     PLAYER_ARGS=("$INPUT_FILE" "--monitor" "$MONITOR")
-    
-    # Only pass --calib-file if explicitly provided by user
     if [ -n "$USER_CALIB_FILE" ] && [ -f "$USER_CALIB_FILE" ]; then
         PLAYER_ARGS+=("--calib-file" "$USER_CALIB_FILE")
     fi
@@ -129,12 +127,5 @@ if [ -n "$USER_CALIB_FILE" ] && [ -f "$USER_CALIB_FILE" ]; then
     GUI_ARGS+=("--calib-file" "$USER_CALIB_FILE")
 fi
 
-# Extract and pass --pipeline to GUI
-for i in "${!EXTRA_ARGS[@]}"; do
-    if [ "${EXTRA_ARGS[$i]}" = "--pipeline" ] && [ -n "${EXTRA_ARGS[$((i+1))]:-}" ]; then
-        GUI_ARGS+=("--pipeline" "${EXTRA_ARGS[$((i+1))]}")
-        break
-    fi
-done
-
-"$VENV_PYTHON" "$GUI_SCRIPT" "${GUI_ARGS[@]}"
+# Pass all EXTRA_ARGS to GUI as well to keep states in sync (e.g. --pipeline quilt)
+"$VENV_PYTHON" "$GUI_SCRIPT" "${GUI_ARGS[@]}" "${EXTRA_ARGS[@]}"
