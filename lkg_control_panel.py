@@ -14,7 +14,7 @@ class LKGControlPanel(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"Looking Glass Go - Control Panel (Monitor {monitor_index})")
         self.setFixedWidth(520)
-        self.setFixedHeight(950)
+        self.setFixedHeight(650)
         
         # UDP Setup
         self.udp_ip = "127.0.0.1"
@@ -129,38 +129,33 @@ class LKGControlPanel(QMainWindow):
         central_widget = QWidget()
         self.setCentralWidget(central_widget)
         layout = QVBoxLayout(central_widget)
-        layout.setContentsMargins(30, 20, 30, 20)
-        layout.setSpacing(12)
-        
-        # Header
-        header = QLabel("LKG GO CONTROLS")
-        header.setObjectName("header")
-        header.setAlignment(Qt.AlignCenter)
-        layout.addWidget(header)
+        layout.setContentsMargins(15, 10, 15, 10)
+        layout.setSpacing(5)
         
         # === Depth Controls ===
         depth_group = QGroupBox("Depth Settings")
         depth_layout = QVBoxLayout(depth_group)
         
-        # Focus
+        # Focus & Depthiness in one row
+        depth_row = QHBoxLayout()
         self.focus_label = QLabel(f"Focus: {self.focus:.2f}")
-        depth_layout.addWidget(self.focus_label)
+        depth_row.addWidget(self.focus_label)
         self.focus_slider = QSlider(Qt.Horizontal)
-        self.focus_slider.setMinimum(0)
-        self.focus_slider.setMaximum(100)
+        self.focus_slider.setRange(0, 100)
         self.focus_slider.setValue(int(self.focus * 100))
         self.focus_slider.valueChanged.connect(self.update_params)
-        depth_layout.addWidget(self.focus_slider)
+        depth_row.addWidget(self.focus_slider)
+        depth_layout.addLayout(depth_row)
         
-        # Depthiness
+        depthiness_row = QHBoxLayout()
         self.depth_label = QLabel(f"Depthiness: {self.depthiness:.2f}")
-        depth_layout.addWidget(self.depth_label)
+        depthiness_row.addWidget(self.depth_label)
         self.depth_slider = QSlider(Qt.Horizontal)
-        self.depth_slider.setMinimum(0)
-        self.depth_slider.setMaximum(100)
+        self.depth_slider.setRange(0, 100)
         self.depth_slider.setValue(int(self.depthiness * 100))
         self.depth_slider.valueChanged.connect(self.update_params)
-        depth_layout.addWidget(self.depth_slider)
+        depthiness_row.addWidget(self.depth_slider)
+        depth_layout.addLayout(depthiness_row)
         
         # Toggle Buttons
         btn_layout = QHBoxLayout()
@@ -202,50 +197,53 @@ class LKGControlPanel(QMainWindow):
         parallax_row.addWidget(self.parallax_spin)
         hq_layout.addLayout(parallax_row)
         
-        # Depth Near
-        self.near_label = QLabel(f"Depth Near: {self.depthNear:.2f}")
-        hq_layout.addWidget(self.near_label)
+        # Combine Near/Far
+        nf_row = QHBoxLayout()
+        self.near_label = QLabel(f"N: {self.depthNear:.2f}")
+        nf_row.addWidget(self.near_label)
         self.near_slider = QSlider(Qt.Horizontal)
         self.near_slider.setRange(0, 100)
         self.near_slider.setValue(int(self.depthNear * 100))
         self.near_slider.valueChanged.connect(self.update_params)
-        hq_layout.addWidget(self.near_slider)
+        nf_row.addWidget(self.near_slider)
         
-        # Depth Far
-        self.far_label = QLabel(f"Depth Far: {self.depthFar:.2f}")
-        hq_layout.addWidget(self.far_label)
+        self.far_label = QLabel(f"F: {self.depthFar:.2f}")
+        nf_row.addWidget(self.far_label)
         self.far_slider = QSlider(Qt.Horizontal)
         self.far_slider.setRange(0, 100)
         self.far_slider.setValue(int(self.depthFar * 100))
         self.far_slider.valueChanged.connect(self.update_params)
-        hq_layout.addWidget(self.far_slider)
+        nf_row.addWidget(self.far_slider)
+        hq_layout.addLayout(nf_row)
         
-        # Depth Gamma
-        self.gamma_label = QLabel(f"Depth Gamma: {self.depthGamma:.2f}")
-        hq_layout.addWidget(self.gamma_label)
+        # Combine Gamma/Edge/Smooth in two rows
+        row2 = QHBoxLayout()
+        self.gamma_label = QLabel(f"G: {self.depthGamma:.2f}")
+        row2.addWidget(self.gamma_label)
         self.gamma_slider = QSlider(Qt.Horizontal)
         self.gamma_slider.setRange(1, 300)
         self.gamma_slider.setValue(int(self.depthGamma * 100))
         self.gamma_slider.valueChanged.connect(self.update_params)
-        hq_layout.addWidget(self.gamma_slider)
+        row2.addWidget(self.gamma_slider)
+        hq_layout.addLayout(row2)
         
-        # Edge Fade
-        self.edge_label = QLabel(f"Edge Fade (Denoise): {self.edgeFade:.2f}")
-        hq_layout.addWidget(self.edge_label)
+        row3 = QHBoxLayout()
+        self.edge_label = QLabel(f"E: {self.edgeFade:.2f}")
+        row3.addWidget(self.edge_label)
         self.edge_slider = QSlider(Qt.Horizontal)
         self.edge_slider.setRange(0, 100)
         self.edge_slider.setValue(int(self.edgeFade * 100))
         self.edge_slider.valueChanged.connect(self.update_params)
-        hq_layout.addWidget(self.edge_slider)
-
-        # Depth Smooth
-        self.smooth_label = QLabel(f"Depth Smooth (Blur): {self.depthSmooth:.2f}")
-        hq_layout.addWidget(self.smooth_label)
+        row3.addWidget(self.edge_slider)
+        
+        self.smooth_label = QLabel(f"S: {self.depthSmooth:.2f}")
+        row3.addWidget(self.smooth_label)
         self.smooth_slider = QSlider(Qt.Horizontal)
         self.smooth_slider.setRange(0, 100)
         self.smooth_slider.setValue(int(self.depthSmooth * 100))
         self.smooth_slider.valueChanged.connect(self.update_params)
-        hq_layout.addWidget(self.smooth_slider)
+        row3.addWidget(self.smooth_slider)
+        hq_layout.addLayout(row3)
         
         layout.addWidget(hq_group)
         
@@ -369,31 +367,35 @@ class LKGControlPanel(QMainWindow):
         self.update_params()
 
     def update_params(self):
-        self.focus = self.focus_slider.value() / 100.0
-        self.depthiness = self.depth_slider.value() / 100.0
-        self.maxParallaxPx = self.parallax_spin.value()
-        self.depthNear = self.near_slider.value() / 100.0
-        self.depthFar = self.far_slider.value() / 100.0
-        if self.depthFar <= self.depthNear + 0.01:
-            self.depthFar = self.depthNear + 0.01
-            self.far_slider.setValue(int(self.depthFar * 100))
+        try:
+            self.focus = self.focus_slider.value() / 100.0
+            self.depthiness = self.depth_slider.value() / 100.0
+            self.maxParallaxPx = self.parallax_spin.value()
+            self.depthNear = self.near_slider.value() / 100.0
+            self.depthFar = self.far_slider.value() / 100.0
+            if self.depthFar <= self.depthNear + 0.01:
+                self.depthFar = self.depthNear + 0.01
+                self.far_slider.setValue(int(self.depthFar * 100))
+                
+            self.depthGamma = self.gamma_slider.value() / 100.0
+            self.edgeFade = self.edge_slider.value() / 100.0
+            self.depthSmooth = self.smooth_slider.value() / 100.0
             
-        self.depthGamma = self.gamma_slider.value() / 100.0
-        self.edgeFade = self.edge_slider.value() / 100.0
-        self.depthSmooth = self.smooth_slider.value() / 100.0
-        
-        self.pitch = self.pitch_spin.value()
-        self.tilt = self.tilt_spin.value()
-        self.center = self.center_spin.value()
-        self.debugMode = self.debug_combo.currentIndex()
-        
-        self.focus_label.setText(f"Focus: {self.focus:.2f}")
-        self.depth_label.setText(f"Depthiness: {self.depthiness:.2f}")
-        self.near_label.setText(f"Depth Near: {self.depthNear:.2f}")
-        self.far_label.setText(f"Depth Far: {self.depthFar:.2f}")
-        self.gamma_label.setText(f"Depth Gamma: {self.depthGamma:.2f}")
-        self.edge_label.setText(f"Edge Fade (Denoise): {self.edgeFade:.2f}")
-        self.smooth_label.setText(f"Depth Smooth (Blur): {self.depthSmooth:.2f}")
+            self.pitch = self.pitch_spin.value()
+            self.tilt = self.tilt_spin.value()
+            self.center = self.center_spin.value()
+            self.debugMode = self.debug_combo.currentIndex()
+            
+            self.focus_label.setText(f"Focus: {self.focus:.2f}")
+            self.depth_label.setText(f"D: {self.depthiness:.2f}")
+            self.near_label.setText(f"N: {self.depthNear:.2f}")
+            self.far_label.setText(f"F: {self.depthFar:.2f}")
+            self.gamma_label.setText(f"G: {self.depthGamma:.2f}")
+            self.edge_label.setText(f"E: {self.edgeFade:.2f}")
+            self.smooth_label.setText(f"S: {self.depthSmooth:.2f}")
+        except RuntimeError:
+            return # Object already deleted during close
+
         
         # Send via UDP
         msg = {
@@ -421,28 +423,57 @@ class LKGControlPanel(QMainWindow):
             print(f"UDP send error: {e}")
 
     def reset_defaults(self):
-        self.load_calibration()  # Re-load from file
-        self.focus_slider.setValue(50)
-        self.depth_slider.setValue(100)
-        self.parallax_spin.setValue(self.maxParallaxPx)
-        self.near_slider.setValue(int(self.depthNear * 100))
-        self.far_slider.setValue(int(self.depthFar * 100))
-        self.gamma_slider.setValue(int(self.depthGamma * 100))
-        self.edge_slider.setValue(int(self.edgeFade * 100))
-        self.smooth_slider.setValue(int(self.depthSmooth * 100))
-        
-        self.swap_btn.setChecked(True)
-        self.inv_btn.setChecked(True)
-        self.inv_depth_btn.setChecked(False)
-        self.test_btn.setChecked(False)
-        self.depthLoc = 3
-        self.invView = 1
-        self.invertDepth = 0
-        self.testPattern = 0
-        self.pitch_spin.setValue(self.pitch)
-        self.tilt_spin.setValue(self.tilt)
-        self.center_spin.setValue(self.center)
-        self.update_params()
+        try:
+            self.load_calibration()  # Re-load from file
+            
+            # Block signals to avoid recursive/deleted object calls during update
+            self.focus_slider.blockSignals(True)
+            self.depth_slider.blockSignals(True)
+            self.near_slider.blockSignals(True)
+            self.far_slider.blockSignals(True)
+            self.gamma_slider.blockSignals(True)
+            self.edge_slider.blockSignals(True)
+            self.smooth_slider.blockSignals(True)
+            self.pitch_spin.blockSignals(True)
+            self.tilt_spin.blockSignals(True)
+            self.center_spin.blockSignals(True)
+            
+            self.focus_slider.setValue(50)
+            self.depth_slider.setValue(100)
+            self.parallax_spin.setValue(self.maxParallaxPx)
+            self.near_slider.setValue(int(self.depthNear * 100))
+            self.far_slider.setValue(int(self.depthFar * 100))
+            self.gamma_slider.setValue(int(self.depthGamma * 100))
+            self.edge_slider.setValue(int(self.edgeFade * 100))
+            self.smooth_slider.setValue(int(self.depthSmooth * 100))
+            
+            self.swap_btn.setChecked(True)
+            self.inv_btn.setChecked(True)
+            self.inv_depth_btn.setChecked(False)
+            self.test_btn.setChecked(False)
+            self.depthLoc = 3
+            self.invView = 1
+            self.invertDepth = 0
+            self.testPattern = 0
+            self.pitch_spin.setValue(self.pitch)
+            self.tilt_spin.setValue(self.tilt)
+            self.center_spin.setValue(self.center)
+            
+            self.focus_slider.blockSignals(False)
+            self.depth_slider.blockSignals(False)
+            self.near_slider.blockSignals(False)
+            self.far_slider.blockSignals(False)
+            self.gamma_slider.blockSignals(False)
+            self.edge_slider.blockSignals(False)
+            self.smooth_slider.blockSignals(False)
+            self.pitch_spin.blockSignals(False)
+            self.tilt_spin.blockSignals(False)
+            self.center_spin.blockSignals(False)
+            
+            self.update_params()
+        except RuntimeError:
+            pass
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()

@@ -56,6 +56,7 @@ uniform float depthFar;
 uniform float depthGamma;
 uniform float edgeFade;
 uniform float edgeLow;
+uniform float edgeHigh;
 uniform float depthSmooth;
 uniform vec2 texelSize;
 
@@ -217,7 +218,7 @@ class LKGPlayer:
         self.edgeLow = 0.02
         self.edgeHigh = 0.10
         self.depthLoc = args.depth_loc
-        self.udp_port = 5005
+        self.udp_port = 5000 + args.monitor
         self.debugMode = 0
         
         # Calibration defaults for LKG Go (Shader coordinates)
@@ -230,7 +231,7 @@ class LKGPlayer:
         self.testPattern = 0
         
         self.load_calibration()
-
+        self.start_udp_listener()
 
     def start_udp_listener(self):
         def udp_loop():
@@ -284,6 +285,7 @@ class LKGPlayer:
                     if 'debugMode' in msg:
                         self.debugMode = int(msg['debugMode'])
                     
+                    # print(f"DEBUG: Received UDP focus={self.focus}") # Temporarily uncomment if still no reflection
                     self.print_runtime_params("UDP")
                 except socket.timeout:
                     continue
@@ -294,9 +296,7 @@ class LKGPlayer:
         
         t = threading.Thread(target=udp_loop, daemon=True)
         t.start()
-
-        t.start()
-
+    
     def print_runtime_params(self, prefix="Runtime"):
         print(f"[{prefix}] Mode={self.debugMode} Depthiness={self.depthiness:.2f} MaxParallax={self.maxParallaxPx:.2f} PScale={self.parallaxScale:.5f}")
         print(f"[{prefix}] Near={self.depthNear:.2f} Far={self.depthFar:.2f} Gamma={self.depthGamma:.2f} Smooth={self.depthSmooth:.2f} EdgeFade={self.edgeFade:.2f}")
@@ -310,9 +310,19 @@ class LKGPlayer:
             if not os.path.exists(base): continue
             try:
                 for drive in os.listdir(base):
-                    full_path = os.path.join(base, drive, "LKG_calibration", "visual.json")
-                    if os.path.exists(full_path):
-                        return full_path
+                    drive_path = os.path.join(base, drive)
+                    # Case 1: drive/LKG_calibration/visual.json
+                    full_path = os.path.join(drive_path, "LKG_calibration", "visual.json")
+                    if os.path.exists(full_path): return full_path
+                    # Case 2: drive/visual.json
+                    full_path = os.path.join(drive_path, "visual.json")
+                    if os.path.exists(full_path): return full_path
+                    
+                    # Also check one level deeper in case of user-specific mount points
+                    if os.path.isdir(drive_path):
+                        for sub in os.listdir(drive_path):
+                            full_path = os.path.join(drive_path, sub, "LKG_calibration", "visual.json")
+                            if os.path.exists(full_path): return full_path
             except:
                 continue
         return None
@@ -320,13 +330,15 @@ class LKGPlayer:
     def load_calibration(self):
         calib_file = self.args.calib_file
         
-        if not calib_file:
-            # First try discovering factory calibration
+        if not calib_file or "lkg_calibration.json" in calib_file:
+            # If no file provided OR it's the default override file, 
+            # try to discover the real factory calibration first.
             factory_path = self.discover_factory_calibration()
             if factory_path:
-                print(f"Found factory calibration: {factory_path}")
+                print(f"Discovered and prioritized factory calibration: {factory_path}")
                 calib_file = factory_path
-            else:
+            elif not calib_file:
+                # Fallback to default path if nothing else
                 script_dir = os.path.dirname(os.path.abspath(__file__))
                 default_path = os.path.join(script_dir, "lkg_calibration.json")
                 if os.path.exists(default_path):
@@ -336,8 +348,11 @@ class LKGPlayer:
             try:
                 with open(calib_file, 'r') as f:
                     data = json.load(f)
+                    overrides = data.get('runtimeOverride', {})
                     
-                    config = data.get('configValue', {})
+                    # Factory visual.json has values at root, my config has 'configValue'
+                    config = data.get('configValue', data)
+                    
                     raw_pitch = float(config.get("pitch", {}).get("value", 49.818))
                     raw_slope = float(config.get("slope", {}).get("value", -5.48))
                     raw_center = float(config.get("center", {}).get("value", 0.157))
@@ -354,6 +369,11 @@ class LKGPlayer:
                     self.center = raw_center
                     self.subp = self.pitch / (3.0 * screen_w)
                     
+                    # Apply runtime offsets
+                    self.pitch += float(overrides.get("pitchOffset", 0.0))
+                    self.tilt += float(overrides.get("tiltOffset", 0.0))
+                    self.center += float(overrides.get("centerOffset", 0.0))
+
                     self.maxParallaxPx = float(overrides.get("maxParallaxPx", self.maxParallaxPx))
                     self.depthNear = float(overrides.get("depthNear", self.depthNear))
                     self.depthFar = float(overrides.get("depthFar", self.depthFar))
@@ -389,9 +409,9 @@ class LKGPlayer:
         if not glfw.init():
             return False
         
-        # Override UDP port based on monitor index so multiple instances don't clash
-        self.udp_port = 5000 + self.args.monitor
-        self.start_udp_listener()
+        # UDP port is already set in __init__ based on monitor index
+        # self.udp_port = 5000 + self.args.monitor
+        # self.start_udp_listener() # Already started in __init__
 
         lkg_monitors = self.find_lkg_monitors()
         lkg_pos = None
