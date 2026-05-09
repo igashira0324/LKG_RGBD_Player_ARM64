@@ -44,13 +44,15 @@ class LKGControlPanel(QMainWindow):
         self.invView = 0
         self.debugFixedView = -1
         self.quiltFit = 0
+        self.flipRows = 0
         self.pipeline = pipeline
         self.depthContrast = 1.2
 
-        self.quiltCols = 8
+        self.quiltCols = 11
         self.quiltRows = 6
-        self.quiltViews = 48
+        self.quiltViews = 66
         self.quiltAspect = 0.5625
+
 
 
 
@@ -461,6 +463,12 @@ class LKGControlPanel(QMainWindow):
         self.fit_combo.currentIndexChanged.connect(self.update_fit)
         fit_row.addWidget(self.fit_combo)
         layout.addLayout(fit_row)
+
+        self.flip_rows_btn = QPushButton("FLIP ROWS: OFF")
+        self.flip_rows_btn.setCheckable(True)
+        self.flip_rows_btn.clicked.connect(self.toggle_flip_rows)
+        layout.addWidget(self.flip_rows_btn)
+
         
         # Presets
         preset_row = QHBoxLayout()
@@ -580,50 +588,46 @@ class LKGControlPanel(QMainWindow):
             self.gamma_label.setText(f"G: {self.depthGamma:.2f}")
             self.contrast_label.setText(f"C: {self.depthContrast:.2f}")
             self.edge_label.setText(f"E: {self.edgeFade:.2f}")
-            self.smooth_label.setText(f"S: {self.depthSmooth:.2f}")
-            self.pipeline = self.pipe_combo.currentText()
-            self.quiltCols = int(self.q_cols_spin.value())
-            self.quiltRows = int(self.q_rows_spin.value())
-            self.quiltViews = self.quiltCols * self.quiltRows
-            self.quiltAspect = self.q_aspect_spin.value()
-        except RuntimeError:
+            # Prepare UDP message payload
+            msg = {
+                "pipeline": self.pipeline,
+                "invView": self.invView,
+                "pitch": self.pitch,
+                "tilt": self.tilt,
+                "center": self.center,
+                "flipSubp": self.flipSubp
+            }
 
+            if self.pipeline in ("quilt", "quilt-gen"):
+                # Quilt specific
+                msg.update({
+                    "quiltCols": self.quiltCols,
+                    "quiltRows": self.quiltRows,
+                    "quiltViews": self.quiltViews,
+                    "quiltAspect": self.quiltAspect,
+                    "quiltFit": self.quiltFit,
+                    "flipRows": self.flipRows,
+                    "debugFixedView": self.debugFixedView,
+                })
+            
+            if self.pipeline in ("rgbd", "quilt-gen"):
+                # RGBD DIBR specific
+                msg.update({
+                    "focus": self.focus_slider.value() / 100.0,
+                    "depthiness": self.depth_slider.value() / 10.0,
+                    "maxParallaxPx": self.parallax_slider.value() / 10.0,
+                    "depthContrast": self.contrast_slider.value() / 10.0,
+                    "depthGamma": self.gamma_slider.value() / 10.0,
+                    "depthSmooth": self.smooth_slider.value() / 100.0,
+                    "edgeFade": self.edge_slider.value() / 100.0,
+                    "depthLoc": self.depthLoc,
+                    "invertDepth": self.invertDepth,
+                    "testPattern": 1 if self.test_btn.isChecked() else 0,
+                    "debugMode": self.debugMode
+                })
 
-            return # Object already deleted during close
-
-        
-        # Send via UDP
-        msg = {
-            "focus": self.focus,
-            "depthiness": self.depthiness,
-            "invView": self.invView,
-            "debugFixedView": self.debugFixedView,
-            "quiltFit": self.quiltFit,
-            "depthLoc": self.depthLoc,
-            "invertDepth": self.invertDepth,
-            "testPattern": self.testPattern,
-            "pitch": self.pitch,
-            "tilt": self.tilt,
-            "center": self.center,
-            "flipSubp": self.flipSubp,
-            "maxParallaxPx": self.maxParallaxPx,
-            "depthNear": self.depthNear,
-            "depthFar": self.depthFar,
-            "depthGamma": self.depthGamma,
-            "depthContrast": self.depthContrast,
-            "edgeFade": self.edgeFade,
-            "depthSmooth": self.depthSmooth,
-            "debugMode": self.debugMode,
-            "pipeline": self.pipeline,
-            "quiltCols": self.quiltCols,
-            "quiltRows": self.quiltRows,
-            "quiltViews": self.quiltViews,
-            "quiltAspect": self.quiltAspect
-        }
-
-
-        try:
-            self.sock.sendto(json.dumps(msg).encode(), (self.udp_ip, self.udp_port))
+            data = json.dumps(msg).encode('utf-8')
+            self.udp_socket.sendto(data, ('127.0.0.1', self.udp_port))
         except Exception as e:
             print(f"UDP send error: {e}")
 

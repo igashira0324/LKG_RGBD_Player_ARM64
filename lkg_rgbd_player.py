@@ -272,8 +272,10 @@ uniform int quiltFit;       // 0=stretch, 1=contain, 2=cover
 uniform sampler2D texQuilt;
 uniform int cols;
 uniform int rows;
+uniform int flipRows;
 uniform float quiltAspect;
 uniform float inputAspect;
+
 
 
 void main() {
@@ -304,6 +306,8 @@ void main() {
         // Calculate tile coordinates (standard LKG Quilt: View 0 is bottom-left)
         int col = currentView % cols;
         int row = currentView / cols;
+        if (flipRows == 1) row = (rows - 1) - row;
+
         
         // --- Aspect Ratio Correction (Fit) ---
         vec2 localUV = TexCoord;
@@ -374,10 +378,28 @@ class LKGPlayer:
         # Quilt Config
         self.quiltCols = args.quilt_cols
         self.quiltRows = args.quilt_rows
+        self.quiltTotalViews = self.quiltCols * self.quiltRows
+        self.quiltAspect = args.quilt_aspect
+        self.quiltFit = 0 # 0=stretch
+        self.flipRows = 0
+        self.debugFixedView = -1
+        
         # Auto-parse quilt settings from filename
         self.parse_quilt_filename(args.input)
 
         self.quilt_gen = QuiltGenerator(cols=self.quiltCols, rows=self.quiltRows, quilt_res=4092)
+
+        # Calibration defaults for LKG Go (Shader coordinates)
+        self.pitch = 143.6
+        self.tilt = -0.324
+        self.center = 0.0
+        self.subp = self.pitch / (1440.0 * 3.0)
+        self.flipSubp = 0
+        self.invertDepth = 0
+        self.testPattern = 0
+        
+        self.load_calibration()
+        self.start_udp_listener()
 
     def parse_quilt_filename(self, filename):
         import re
@@ -402,17 +424,6 @@ class LKGPlayer:
 
 
         
-        # Calibration defaults for LKG Go (Shader coordinates)
-        self.pitch = 143.6
-        self.tilt = -0.324
-        self.center = 0.0
-        self.subp = self.pitch / (1440.0 * 3.0)
-        self.flipSubp = 0
-        self.invertDepth = 0
-        self.testPattern = 0
-        
-        self.load_calibration()
-        self.start_udp_listener()
 
     def start_udp_listener(self):
         def udp_loop():
@@ -505,9 +516,15 @@ class LKGPlayer:
     def print_runtime_params(self, prefix="Runtime"):
         print(f"[{prefix}] Pipeline={self.pipeline} Mode={self.debugMode} InvView={self.invView} DepthLoc={self.depthLoc}")
         if self.pipeline in ("quilt", "quilt-gen"):
-            print(f"[{prefix}] QUILT: {self.quiltCols}x{self.quiltRows} Views={self.quiltTotalViews} Aspect={self.quiltAspect} Fit={self.quiltFit} FixedView={self.debugFixedView}")
-        print(f"[{prefix}] Depthiness={self.depthiness:.2f} MaxParallax={self.maxParallaxPx:.2f} PScale={self.parallaxScale:.5f}")
-        print(f"[{prefix}] Near={self.depthNear:.2f} Far={self.depthFar:.2f} Gamma={self.depthGamma:.2f} Smooth={self.depthSmooth:.2f} EdgeFade={self.edgeFade:.2f}")
+            print(f"[{prefix}] SHADER: QUILT")
+            print(f"[{prefix}] QUILT: {self.quiltCols}x{self.quiltRows} Views={self.quiltTotalViews} Aspect={self.quiltAspect} Fit={self.quiltFit} FlipRows={self.flipRows}")
+            print(f"[{prefix}] DEBUG: FixedView={self.debugFixedView}")
+        else:
+            print(f"[{prefix}] SHADER: RGBD (DIBR)")
+            print(f"[{prefix}] PARALLAX: Depthiness={self.depthiness:.2f} MaxParallax={self.maxParallaxPx:.2f} PScale={self.parallaxScale:.5f}")
+            print(f"[{prefix}] QUALITY: Near={self.depthNear:.2f} Far={self.depthFar:.2f} Gamma={self.depthGamma:.2f} Smooth={self.depthSmooth:.2f} EdgeFade={self.edgeFade:.2f}")
+        print(f"[{prefix}] CALIB: Pitch={self.pitch:.4f} Tilt={self.tilt:.4f} Center={self.center:.4f} Subp={self.subp:.6f}")
+
 
 
 
@@ -959,10 +976,12 @@ class LKGPlayer:
             if pipeline_mode in ("quilt", "quilt-gen"):
                 set_uniform_int(target_shader, "cols", self.quiltCols)
                 set_uniform_int(target_shader, "rows", self.quiltRows)
+                set_uniform_int(target_shader, "flipRows", self.flipRows)
                 set_uniform_float(target_shader, "quiltAspect", self.quiltAspect)
                 set_uniform_float(target_shader, "inputAspect", float(frame_w) / float(frame_h))
                 set_uniform_int(target_shader, "quiltFit", self.quiltFit)
                 set_uniform_int(target_shader, "debugFixedView", self.debugFixedView)
+
 
 
             else:
@@ -1015,10 +1034,11 @@ if __name__ == "__main__":
     parser.add_argument("input")
     parser.add_argument("--monitor", type=int, default=1)
     parser.add_argument("--pipeline", choices=["rgbd", "quilt", "quilt-gen"], default="rgbd")
-    parser.add_argument("--quilt-cols", type=int, default=8)
+    parser.add_argument("--quilt-cols", type=int, default=11)
     parser.add_argument("--quilt-rows", type=int, default=6)
-    parser.add_argument("--quilt-views", type=int, default=48)
+    parser.add_argument("--quilt-views", type=int, default=66)
     parser.add_argument("--quilt-aspect", type=float, default=0.5625) # 1440/2560
+
     parser.add_argument("--audio-device", default="pulse", help="Audio device for ffplay")
 
 
