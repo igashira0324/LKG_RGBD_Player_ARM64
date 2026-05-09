@@ -74,16 +74,43 @@ float readDepth(vec2 uv) {
     return d;
 }
 
-float getSmoothDepth(vec2 uv) {
+float getBilateralDepth(vec2 uv) {
     float c = readDepth(uv);
-    float l = readDepth(uv + vec2(-texelSize.x, 0.0));
-    float r = readDepth(uv + vec2( texelSize.x, 0.0));
-    float u = readDepth(uv + vec2(0.0, -texelSize.y));
-    float b = readDepth(uv + vec2(0.0,  texelSize.y));
-
-    float avg = (c * 4.0 + l + r + u + b) / 8.0;
-    return mix(c, avg, depthSmooth);
+    float totalWeight = 1.0;
+    float sum = c;
+    
+    // 5-tap cross pattern bilateral filter
+    vec2 offsets[4];
+    offsets[0] = vec2(-texelSize.x, 0.0);
+    offsets[1] = vec2( texelSize.x, 0.0);
+    offsets[2] = vec2(0.0, -texelSize.y);
+    offsets[3] = vec2(0.0,  texelSize.y);
+    
+    float sigma = 0.1 + (1.0 - depthSmooth) * 0.5; // Sensitivity inversely proportional to smoothness
+    
+    for (int i = 0; i < 4; i++) {
+        float d = readDepth(uv + offsets[i]);
+        float diff = d - c;
+        float weight = exp(-(diff * diff) / (2.0 * sigma * sigma));
+        sum += d * weight;
+        totalWeight += weight;
+    }
+    
+    return sum / totalWeight;
 }
+
+float getDilatedDepth(vec2 uv) {
+    // 3x3 max filter for edge dilation (assuming 1.0 is near)
+    float maxD = readDepth(uv);
+    for (int x = -1; x <= 1; x++) {
+        for (int y = -1; y <= 1; y++) {
+            if (x == 0 && y == 0) continue;
+            maxD = max(maxD, readDepth(uv + vec2(float(x) * texelSize.x, float(y) * texelSize.y)));
+        }
+    }
+    return maxD;
+}
+
 
 void main() {
     vec3 color;
@@ -151,14 +178,17 @@ void main() {
             depth_uv = vec2(TexCoord.x, sample_y * 0.5);
         }
         
-        float d = getSmoothDepth(depth_uv);
-
         if (debugMode == 2) { // Depth Only
-            FragColor = vec4(vec3(d), 1.0);
+            FragColor = vec4(vec3(getBilateralDepth(depth_uv)), 1.0);
             return;
         }
 
+        // --- Depth Smoothing & Dilation ---
+        float smoothedDepth = getBilateralDepth(depth_uv);
+        float dilatedDepth = getDilatedDepth(depth_uv);
+        
         // --- Depth Remapping ---
+        float d = smoothedDepth;
         float nearVal = min(depthNear, depthFar - 0.001);
         float farVal = max(depthFar, depthNear + 0.001);
         d = clamp((d - nearVal) / max(farVal - nearVal, 0.0001), 0.0, 1.0);
@@ -168,11 +198,15 @@ void main() {
         float depthGrad = abs(dFdx(d)) + abs(dFdy(d));
         float edge = smoothstep(edgeLow, edgeHigh, depthGrad);
 
-        // --- Parallax Scaling ---
-        float depthCentered = clamp((d - focus) * 2.0, -1.0, 1.0);
+        // Use dilated depth for the warp offset calculation to "pull" foreground edges over background
+        // Increase influence for more noticeable Phase 2 effect
+        float finalDepth = mix(smoothedDepth, dilatedDepth, 0.5 * depthSmooth);
+        
+        float depthCentered = (finalDepth - focus) * 2.0;
         float viewCentered = (view - 0.5) * 2.0;
+        
         float offset = depthCentered * viewCentered * depthiness * parallaxScale;
-
+        
         // Reduce offset at edges to hide artifacts
         offset *= mix(1.0, 1.0 - edgeFade, edge);
         
