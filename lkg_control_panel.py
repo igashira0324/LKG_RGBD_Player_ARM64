@@ -137,22 +137,26 @@ class LKGControlPanel(QMainWindow):
         self.base_tilt = screen_h / (screen_w * raw_slope)
         self.base_center = raw_center
         
+        self.serial = str(get_calib_value(config, "serial", "default"))
+        
         # Overrides
-        overrides = override_data.get('runtimeOverride', {})
-        pitchOffset = float(overrides.get("pitchOffset", 0.0))
-        tiltOffset = float(overrides.get("tiltOffset", 0.0))
-        centerOffset = float(overrides.get("centerOffset", 0.0))
+        common_overrides = override_data.get('runtimeOverride', {})
+        device_overrides = override_data.get('deviceOverride', {}).get(self.serial, {})
+        
+        pitchOffset = float(device_overrides.get("pitchOffset", common_overrides.get("pitchOffset", 0.0)))
+        tiltOffset = float(device_overrides.get("tiltOffset", common_overrides.get("tiltOffset", 0.0)))
+        centerOffset = float(device_overrides.get("centerOffset", common_overrides.get("centerOffset", 0.0)))
         
         self.pitch = self.base_pitch + pitchOffset
         self.tilt = self.base_tilt + tiltOffset
         self.center = self.base_center + centerOffset
         
-        self.maxParallaxPx = float(overrides.get("maxParallaxPx", self.maxParallaxPx))
-        self.depthNear = float(overrides.get("depthNear", self.depthNear))
-        self.depthFar = float(overrides.get("depthFar", self.depthFar))
-        self.depthGamma = float(overrides.get("depthGamma", self.depthGamma))
-        self.depthSmooth = float(overrides.get("depthSmooth", self.depthSmooth))
-        self.edgeFade = float(overrides.get("edgeFade", self.edgeFade))
+        self.maxParallaxPx = float(common_overrides.get("maxParallaxPx", self.maxParallaxPx))
+        self.depthNear = float(common_overrides.get("depthNear", self.depthNear))
+        self.depthFar = float(common_overrides.get("depthFar", self.depthFar))
+        self.depthGamma = float(common_overrides.get("depthGamma", self.depthGamma))
+        self.depthSmooth = float(common_overrides.get("depthSmooth", self.depthSmooth))
+        self.edgeFade = float(common_overrides.get("edgeFade", self.edgeFade))
                 
     def save_calibration(self):
         calib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lkg_calibration.json")
@@ -161,16 +165,19 @@ class LKGControlPanel(QMainWindow):
             with open(calib_path, 'r') as f:
                 data = json.load(f)
                 
-        overrides = data.setdefault("runtimeOverride", {})
-        overrides["pitchOffset"] = self.pitch - self.base_pitch
-        overrides["tiltOffset"] = self.tilt - self.base_tilt
-        overrides["centerOffset"] = self.center - self.base_center
-        overrides["maxParallaxPx"] = self.maxParallaxPx
-        overrides["depthNear"] = self.depthNear
-        overrides["depthFar"] = self.depthFar
-        overrides["depthGamma"] = self.depthGamma
-        overrides["depthSmooth"] = self.depthSmooth
-        overrides["edgeFade"] = self.edgeFade
+        common = data.setdefault("runtimeOverride", {})
+        common["maxParallaxPx"] = self.maxParallaxPx
+        common["depthNear"] = self.depthNear
+        common["depthFar"] = self.depthFar
+        common["depthGamma"] = self.depthGamma
+        common["depthSmooth"] = self.depthSmooth
+        common["edgeFade"] = self.edgeFade
+        
+        device_overrides = data.setdefault("deviceOverride", {})
+        dev = device_overrides.setdefault(self.serial, {})
+        dev["pitchOffset"] = self.pitch - self.base_pitch
+        dev["tiltOffset"] = self.tilt - self.base_tilt
+        dev["centerOffset"] = self.center - self.base_center
         
         with open(calib_path, 'w') as f:
             json.dump(data, f, indent=2)

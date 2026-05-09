@@ -8,10 +8,13 @@ NVIDIA DGX SPARK (ARM64) 環境において、Looking Glass Go をスタンド�
 
 本システムは、ハードウェア固有の値を最大限に活用しつつ、ユーザーがリアルタイムに微調整できる二層構造を採用しています。
 
-### A. ベース・キャリブレーション (Factory Calibration)
-- **ソース**: Looking Glass Go 本体内（USBドライブとして認識される `/media/` 等のパス）の `LKG_calibration/visual.json` を自動探索します。
-- **優先順位**: 実機のファイルが最優先されます。見つからない場合は `lkg_calibration.json` のデフォルト値を使用します。
-- **自動変換**: 読み込まれた `raw pitch` / `slope` は、光学計算に基づきシェーダー用の `shader pitch` / `tilt` へ自動変換されます。
+### Calibration 優先順位
+
+1. `--calib-file` で明示指定された個別 calibration JSON
+2. Looking Glass Go 本体内の `LKG_calibration/visual.json`
+3. リポジトリ内の `lkg_calibration.json` (主に runtimeOverride 保存用)
+
+**自動変換**: 読み込まれた `raw pitch` / `slope` は、光学計算に基づきシェーダー用の `shader pitch` / `tilt` へ自動変換されます。
 
 ### B. 実行時オーバーライド (Runtime Overrides)
 - **ファイル**: `lkg_calibration.json` の `runtimeOverride` セクション。

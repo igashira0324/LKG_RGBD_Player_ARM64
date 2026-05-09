@@ -400,23 +400,32 @@ class LKGPlayer:
         self.screen_w = screen_w
         self.screen_h = screen_h
         
-        # Runtime Overrides
-        overrides = override_data.get('runtimeOverride', {})
-        self.pitch += float(overrides.get("pitchOffset", 0.0))
-        self.tilt += float(overrides.get("tiltOffset", 0.0))
-        self.center += float(overrides.get("centerOffset", 0.0))
+        # Serial for device-specific overrides
+        self.serial = str(get_calib_value(config, "serial", "default"))
+        
+        # Overrides
+        common_overrides = override_data.get('runtimeOverride', {})
+        device_overrides = override_data.get('deviceOverride', {}).get(self.serial, {})
+        
+        pitchOffset = float(device_overrides.get("pitchOffset", common_overrides.get("pitchOffset", 0.0)))
+        tiltOffset = float(device_overrides.get("tiltOffset", common_overrides.get("tiltOffset", 0.0)))
+        centerOffset = float(device_overrides.get("centerOffset", common_overrides.get("centerOffset", 0.0)))
+        
+        self.pitch += pitchOffset
+        self.tilt += tiltOffset
+        self.center += centerOffset
 
-        self.maxParallaxPx = float(overrides.get("maxParallaxPx", self.maxParallaxPx))
-        self.depthNear = float(overrides.get("depthNear", self.depthNear))
-        self.depthFar = float(overrides.get("depthFar", self.depthFar))
-        self.depthGamma = float(overrides.get("depthGamma", self.depthGamma))
-        self.depthSmooth = float(overrides.get("depthSmooth", self.depthSmooth))
-        self.edgeFade = float(overrides.get("edgeFade", self.edgeFade))
+        self.maxParallaxPx = float(common_overrides.get("maxParallaxPx", self.maxParallaxPx))
+        self.depthNear = float(common_overrides.get("depthNear", self.depthNear))
+        self.depthFar = float(common_overrides.get("depthFar", self.depthFar))
+        self.depthGamma = float(common_overrides.get("depthGamma", self.depthGamma))
+        self.depthSmooth = float(common_overrides.get("depthSmooth", self.depthSmooth))
+        self.edgeFade = float(common_overrides.get("edgeFade", self.edgeFade))
         
         print(f"Calibration source: {calib_file}")
         print(f"Raw calibration: pitch={raw_pitch:.4f}, slope={raw_slope:.4f}, center={raw_center:.4f}, dpi={dpi}, screen={screen_w}x{screen_h}")
         print(f"Shader calibration: pitch={self.pitch:.4f}, tilt={self.tilt:.4f}, center={self.center:.4f}, subp={self.subp:.6f}")
-        print(f"Loaded combined calibration. Overrides: {bool(overrides)}")
+        print(f"Loaded combined calibration. Serial: {self.serial}")
         self.update_parallax_scale()
 
     def find_lkg_monitors(self):
@@ -604,6 +613,7 @@ class LKGPlayer:
 
         self.texture = GL.glGenTextures(1)
         GL.glBindTexture(GL.GL_TEXTURE_2D, self.texture)
+        GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, 1)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
