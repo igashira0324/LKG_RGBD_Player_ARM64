@@ -12,8 +12,8 @@ import socket
 import argparse
 import sys
 import threading
+import time
 import getpass
-import socket
 import ctypes
 import numpy as np
 from OpenGL import GL, GLU
