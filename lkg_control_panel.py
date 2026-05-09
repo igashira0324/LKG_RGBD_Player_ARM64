@@ -480,6 +480,7 @@ class LKGControlPanel(QMainWindow):
             self.pitch_spin.blockSignals(True)
             self.tilt_spin.blockSignals(True)
             self.center_spin.blockSignals(True)
+            self.parallax_spin.blockSignals(True)
             
             self.focus_slider.setValue(50)
             self.depth_slider.setValue(100)
@@ -512,6 +513,7 @@ class LKGControlPanel(QMainWindow):
             self.pitch_spin.blockSignals(False)
             self.tilt_spin.blockSignals(False)
             self.center_spin.blockSignals(False)
+            self.parallax_spin.blockSignals(False)
             
             self.update_params()
         except RuntimeError:

@@ -258,6 +258,7 @@ class LKGPlayer:
                         self.invView = int(msg['invView'])
                     if 'depthLoc' in msg:
                         self.depthLoc = int(msg['depthLoc'])
+                        self.update_parallax_scale()
                     if 'pitch' in msg:
                         self.pitch = float(msg['pitch'])
                     if 'tilt' in msg:
@@ -283,7 +284,6 @@ class LKGPlayer:
                         self.edgeFade = float(msg['edgeFade'])
                     if 'depthSmooth' in msg:
                         self.depthSmooth = float(msg['depthSmooth'])
-                        self.update_parallax_scale() # Parallax depends on scale which might depend on depthLoc (if changed)
                     if 'debugMode' in msg:
                         self.debugMode = int(msg['debugMode'])
                     
@@ -583,11 +583,11 @@ class LKGPlayer:
             self.frame_h, self.frame_w, _ = img.shape
             raw_frame = img.tobytes()
             fps = 30.0
-            self.parallaxScale = self.maxParallaxPx / float(self.frame_w)
+            self.update_parallax_scale()
         else:
             self.frame_w, self.frame_h, fps = self.get_video_info(self.args.input)
             print(f"Video resolution: {self.frame_w}x{self.frame_h} @ {fps:.2f} FPS")
-            self.parallaxScale = self.maxParallaxPx / float(self.frame_w)
+            self.update_parallax_scale()
             self.print_runtime_params("STARTUP")
             self.start_video(self.args.input)
 
