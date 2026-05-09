@@ -341,7 +341,18 @@ class LKGPlayer:
             try:
                 with open(override_file, 'r') as f: ovr = json.load(f)
                 ro = ovr.get("runtimeOverride", {})
-                runtime_map = {"maxParallaxPx": "maxParallaxPx", "depthNear": "depthNear", "depthFar": "depthFar", "depthGamma": "depthGamma", "depthSmooth": "depthSmooth", "depthContrast": "depthContrast", "edgeFade": "edgeFade", "edgeLow": "edgeLow", "edgeHigh": "edgeHigh"}
+                runtime_map = {
+                    "focus": "focus",
+                    "maxParallaxPx": "maxParallaxPx", 
+                    "depthNear": "depthNear", 
+                    "depthFar": "depthFar", 
+                    "depthGamma": "depthGamma", 
+                    "depthSmooth": "depthSmooth", 
+                    "depthContrast": "depthContrast", 
+                    "edgeFade": "edgeFade", 
+                    "edgeLow": "edgeLow", 
+                    "edgeHigh": "edgeHigh"
+                }
                 for json_key, attr in runtime_map.items():
                     if json_key in ro: setattr(self, attr, float(ro[json_key]))
                 device_overrides = {normalize_serial_key(k): v for k, v in ovr.get("deviceOverride", {}).items()}
