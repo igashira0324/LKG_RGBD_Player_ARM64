@@ -209,7 +209,9 @@ class LKGPlayer:
         self.focus = args.focus
         self.depthiness = args.depthiness
         self.maxParallaxPx = args.max_parallax_px
-        self.parallaxScale = 0.02
+        self.parallaxScale = 0.002
+        self.screen_w = 1440.0
+        self.screen_h = 2560.0
         self.invView = args.inv_view
         self.depthNear = 0.05
         self.depthFar = 0.95
@@ -270,8 +272,7 @@ class LKGPlayer:
                         self.testPattern = int(msg['testPattern'])
                     if 'maxParallaxPx' in msg:
                         self.maxParallaxPx = float(msg['maxParallaxPx'])
-                        if hasattr(self, 'frame_w') and self.frame_w > 0:
-                            self.parallaxScale = self.maxParallaxPx / float(self.frame_w)
+                        self.update_parallax_scale()
                     if 'depthNear' in msg:
                         self.depthNear = float(msg['depthNear'])
                     if 'depthFar' in msg:
@@ -282,6 +283,7 @@ class LKGPlayer:
                         self.edgeFade = float(msg['edgeFade'])
                     if 'depthSmooth' in msg:
                         self.depthSmooth = float(msg['depthSmooth'])
+                        self.update_parallax_scale() # Parallax depends on scale which might depend on depthLoc (if changed)
                     if 'debugMode' in msg:
                         self.debugMode = int(msg['debugMode'])
                     
@@ -296,6 +298,16 @@ class LKGPlayer:
         t = threading.Thread(target=udp_loop, daemon=True)
         t.start()
     
+    def update_parallax_scale(self):
+        """Calculate parallaxScale based on display pixels rather than input resolution."""
+        # depthLoc 2/3: Side-by-Side. RGB is 0.5 width of texture.
+        if self.depthLoc in (2, 3):
+            rgb_uv_width = 0.5
+        else:
+            rgb_uv_width = 1.0
+            
+        self.parallaxScale = self.maxParallaxPx * rgb_uv_width / float(self.screen_w)
+
     def print_runtime_params(self, prefix="Runtime"):
         print(f"[{prefix}] Mode={self.debugMode} Depthiness={self.depthiness:.2f} MaxParallax={self.maxParallaxPx:.2f} PScale={self.parallaxScale:.5f}")
         print(f"[{prefix}] Near={self.depthNear:.2f} Far={self.depthFar:.2f} Gamma={self.depthGamma:.2f} Smooth={self.depthSmooth:.2f} EdgeFade={self.edgeFade:.2f}")
@@ -379,6 +391,9 @@ class LKGPlayer:
         self.center = raw_center
         self.subp = self.pitch / (3.0 * screen_w)
         
+        self.screen_w = screen_w
+        self.screen_h = screen_h
+        
         # Runtime Overrides
         overrides = override_data.get('runtimeOverride', {})
         self.pitch += float(overrides.get("pitchOffset", 0.0))
@@ -392,7 +407,11 @@ class LKGPlayer:
         self.depthSmooth = float(overrides.get("depthSmooth", self.depthSmooth))
         self.edgeFade = float(overrides.get("edgeFade", self.edgeFade))
         
+        print(f"Calibration source: {calib_file}")
+        print(f"Raw calibration: pitch={raw_pitch:.4f}, slope={raw_slope:.4f}, center={raw_center:.4f}, dpi={dpi}, screen={screen_w}x{screen_h}")
+        print(f"Shader calibration: pitch={self.pitch:.4f}, tilt={self.tilt:.4f}, center={self.center:.4f}, subp={self.subp:.6f}")
         print(f"Loaded combined calibration. Overrides: {bool(overrides)}")
+        self.update_parallax_scale()
 
     def find_lkg_monitors(self):
         """Find all LKG Go monitors via xrandr."""
@@ -621,7 +640,9 @@ class LKGPlayer:
             GL.glClear(GL.GL_COLOR_BUFFER_BIT)
             GL.glUseProgram(self.shader_program)
             
-            # Update texture using SubImage2D to avoid reallocation
+            # Explicitly set texture unit 0
+            GL.glUniform1i(GL.glGetUniformLocation(self.shader_program, "texRGBD"), 0)
+            GL.glActiveTexture(GL.GL_TEXTURE0)
             GL.glBindTexture(GL.GL_TEXTURE_2D, self.texture)
             if raw_frame is not None:
                 GL.glTexSubImage2D(GL.GL_TEXTURE_2D, 0, 0, 0, frame_w, frame_h, GL.GL_RGB, GL.GL_UNSIGNED_BYTE, raw_frame)
@@ -677,7 +698,7 @@ if __name__ == "__main__":
     parser.add_argument("--calib-file")
     parser.add_argument("--focus", type=float, default=0.5)
     parser.add_argument("--depthiness", type=float, default=1.0)
-    parser.add_argument("--max-parallax-px", type=float, default=8.0)
+    parser.add_argument("--max-parallax-px", type=float, default=3.0)
     parser.add_argument("--depth-loc", type=int, default=3) # 2=Left, 3=Right (ComfyUI outputs Depth on Right)
     parser.add_argument("--inv-view", type=int, default=1)
     parser.add_argument("--wait-trigger")

@@ -33,7 +33,7 @@ class LKGControlPanel(QMainWindow):
         self.debugMode = 0
         
         # High Quality Parameters
-        self.maxParallaxPx = 8.0
+        self.maxParallaxPx = 3.0
         self.depthNear = 0.05
         self.depthFar = 0.95
         self.depthGamma = 1.2
@@ -229,7 +229,7 @@ class LKGControlPanel(QMainWindow):
         
         # Max Parallax Px
         parallax_row = QHBoxLayout()
-        parallax_row.addWidget(QLabel("Max Parallax (px):"))
+        parallax_row.addWidget(QLabel("Max Parallax (display px):"))
         self.parallax_spin = QDoubleSpinBox()
         self.parallax_spin.setRange(0.0, 32.0)
         self.parallax_spin.setSingleStep(0.25)
