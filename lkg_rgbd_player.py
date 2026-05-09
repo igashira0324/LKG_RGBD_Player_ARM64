@@ -50,6 +50,14 @@ uniform float center;
 uniform float subp;
 uniform float focus;
 uniform float depthiness;
+uniform float parallaxScale;
+uniform float depthNear;
+uniform float depthFar;
+uniform float depthGamma;
+uniform float edgeFade;
+uniform float edgeLow;
+uniform float edgeHigh;
+
 uniform int depthLoc; // 0=top, 1=bottom, 2=left, 3=right
 uniform int invView;
 uniform int flipSubp;
@@ -109,12 +117,26 @@ void main() {
             depth_uv = vec2(TexCoord.x, sample_y * 0.5);
         }
         
-        float depth = texture(texRGBD, depth_uv).r;
+        float d = texture(texRGBD, depth_uv).r;
         if (invertDepth == 1) {
-            depth = 1.0 - depth;
+            d = 1.0 - d;
         }
 
-        float offset = (depth - focus) * depthiness * (view - 0.5);
+        // --- Depth Remapping ---
+        d = clamp((d - depthNear) / max(depthFar - depthNear, 0.0001), 0.0, 1.0);
+        d = pow(d, depthGamma);
+
+        // --- Edge Detection & Fading ---
+        float depthGrad = abs(dFdx(d)) + abs(dFdy(d));
+        float edge = smoothstep(edgeLow, edgeHigh, depthGrad);
+
+        // --- Parallax Scaling ---
+        float depthCentered = clamp((d - focus) * 2.0, -1.0, 1.0);
+        float viewCentered = (view - 0.5) * 2.0;
+        float offset = depthCentered * viewCentered * depthiness * parallaxScale;
+
+        // Reduce offset at edges to hide artifacts
+        offset *= mix(1.0, 1.0 - edgeFade, edge);
         
         vec2 warped_uv = rgb_uv + vec2(offset, 0.0);
         warped_uv.x = clamp(warped_uv.x, rgb_min_x, rgb_max_x);
@@ -141,7 +163,14 @@ class LKGPlayer:
         # Real-time control parameters
         self.focus = args.focus
         self.depthiness = args.depthiness
-        self.invView = args.inv_view
+        self.maxParallaxPx = args.max_parallax_px
+        self.parallaxScale = 0.02
+        self.depthNear = 0.05
+        self.depthFar = 0.95
+        self.depthGamma = 1.2
+        self.edgeFade = 0.8
+        self.edgeLow = 0.02
+        self.edgeHigh = 0.10
         self.depthLoc = args.depth_loc
         self.udp_port = 5005
         
@@ -192,6 +221,18 @@ class LKGPlayer:
                         self.invertDepth = int(msg['invertDepth'])
                     if 'testPattern' in msg:
                         self.testPattern = int(msg['testPattern'])
+                    if 'maxParallaxPx' in msg:
+                        self.maxParallaxPx = float(msg['maxParallaxPx'])
+                        if hasattr(self, 'frame_w') and self.frame_w > 0:
+                            self.parallaxScale = self.maxParallaxPx / float(self.frame_w)
+                    if 'depthNear' in msg:
+                        self.depthNear = float(msg['depthNear'])
+                    if 'depthFar' in msg:
+                        self.depthFar = float(msg['depthFar'])
+                    if 'depthGamma' in msg:
+                        self.depthGamma = float(msg['depthGamma'])
+                    if 'edgeFade' in msg:
+                        self.edgeFade = float(msg['edgeFade'])
                 except socket.timeout:
                     continue
                 except Exception as e:
@@ -345,8 +386,13 @@ class LKGPlayer:
 
     def get_video_info(self, path):
         try:
-            cmd = ['ffprobe', '-v', 'error', '-select_streams', 'v:0', 
-                   '-show_entries', 'stream=width,height', '-of', 'json', path]
+            cmd = [
+                'ffprobe', '-v', 'error',
+                '-select_streams', 'v:0',
+                '-show_entries', 'stream=width,height,r_frame_rate,avg_frame_rate',
+                '-of', 'json',
+                path
+            ]
             out = subprocess.check_output(cmd)
             info = json.loads(out)
             width = float(info['streams'][0]['width'])
@@ -354,9 +400,9 @@ class LKGPlayer:
             
             # Get FPS if possible
             fps = 30.0
-            r_frame_rate = info['streams'][0].get('r_frame_rate', '30/1')
-            if '/' in r_frame_rate:
-                num, den = r_frame_rate.split('/')
+            rate = info['streams'][0].get('avg_frame_rate') or info['streams'][0].get('r_frame_rate', '30/1')
+            if '/' in rate:
+                num, den = rate.split('/')
                 if float(den) > 0:
                     fps = float(num) / float(den)
             
@@ -413,9 +459,12 @@ class LKGPlayer:
             raw_frame = img.tobytes()
             fps = 30.0
         else:
-            frame_w, frame_h, fps = self.get_video_info(self.args.input)
-            print(f"Video resolution: {frame_w}x{frame_h} @ {fps:.2f} FPS")
+            self.frame_w, self.frame_h, fps = self.get_video_info(self.args.input)
+            print(f"Video resolution: {self.frame_w}x{self.frame_h} @ {fps:.2f} FPS")
+            self.parallaxScale = self.maxParallaxPx / float(self.frame_w)
             self.start_video(self.args.input)
+
+        frame_w, frame_h = self.frame_w, self.frame_h
 
         self.start_time = time.time()
         self.frame_index = 0
@@ -450,6 +499,8 @@ class LKGPlayer:
                                 time.sleep(0.01)
                                 glfw.poll_events()
                         self.start_video(self.args.input)
+                        self.start_time = time.time()
+                        self.frame_index = 0
                         continue
                     else:
                         break
@@ -474,6 +525,13 @@ class LKGPlayer:
             GL.glUniform1f(GL.glGetUniformLocation(self.shader_program, "subp"), self.subp)
             GL.glUniform1f(GL.glGetUniformLocation(self.shader_program, "focus"), self.focus)
             GL.glUniform1f(GL.glGetUniformLocation(self.shader_program, "depthiness"), self.depthiness)
+            GL.glUniform1f(GL.glGetUniformLocation(self.shader_program, "parallaxScale"), self.parallaxScale)
+            GL.glUniform1f(GL.glGetUniformLocation(self.shader_program, "depthNear"), self.depthNear)
+            GL.glUniform1f(GL.glGetUniformLocation(self.shader_program, "depthFar"), self.depthFar)
+            GL.glUniform1f(GL.glGetUniformLocation(self.shader_program, "depthGamma"), self.depthGamma)
+            GL.glUniform1f(GL.glGetUniformLocation(self.shader_program, "edgeFade"), self.edgeFade)
+            GL.glUniform1f(GL.glGetUniformLocation(self.shader_program, "edgeLow"), self.edgeLow)
+            GL.glUniform1f(GL.glGetUniformLocation(self.shader_program, "edgeHigh"), self.edgeHigh)
             GL.glUniform1i(GL.glGetUniformLocation(self.shader_program, "depthLoc"), self.depthLoc)
             GL.glUniform1i(GL.glGetUniformLocation(self.shader_program, "invView"), self.invView)
             GL.glUniform1i(GL.glGetUniformLocation(self.shader_program, "flipSubp"), self.flipSubp)
@@ -508,6 +566,7 @@ if __name__ == "__main__":
     parser.add_argument("--calib-file")
     parser.add_argument("--focus", type=float, default=0.5)
     parser.add_argument("--depthiness", type=float, default=1.0)
+    parser.add_argument("--max-parallax-px", type=float, default=24.0)
     parser.add_argument("--depth-loc", type=int, default=3) # 2=Left, 3=Right (ComfyUI outputs Depth on Right)
     parser.add_argument("--inv-view", type=int, default=1)
     parser.add_argument("--wait-trigger")

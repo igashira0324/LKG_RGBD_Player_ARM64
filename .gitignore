@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+lkg-env/
+*.log
+lkg_sync_config.env
+.DS_Store
+*.swp

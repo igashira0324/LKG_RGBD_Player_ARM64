@@ -14,7 +14,7 @@ class LKGControlPanel(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"Looking Glass Go - Control Panel (Monitor {monitor_index})")
         self.setFixedWidth(520)
-        self.setFixedHeight(750)
+        self.setFixedHeight(950)
         
         # UDP Setup
         self.udp_ip = "127.0.0.1"
@@ -29,6 +29,13 @@ class LKGControlPanel(QMainWindow):
         self.invertDepth = 0
         self.testPattern = 0
         self.flipSubp = 0
+        
+        # High Quality Parameters
+        self.maxParallaxPx = 24.0
+        self.depthNear = 0.05
+        self.depthFar = 0.95
+        self.depthGamma = 1.2
+        self.edgeFade = 0.8
         
         # Base values from factory config
         self.base_pitch = 143.6
@@ -82,6 +89,13 @@ class LKGControlPanel(QMainWindow):
                     self.pitch = self.base_pitch + pitchOffset
                     self.tilt = self.base_tilt + tiltOffset
                     self.center = self.base_center + centerOffset
+                    
+                    # Read High Quality Overrides
+                    self.maxParallaxPx = float(overrides.get("maxParallaxPx", self.maxParallaxPx))
+                    self.depthNear = float(overrides.get("depthNear", self.depthNear))
+                    self.depthFar = float(overrides.get("depthFar", self.depthFar))
+                    self.depthGamma = float(overrides.get("depthGamma", self.depthGamma))
+                    self.edgeFade = float(overrides.get("edgeFade", self.edgeFade))
             except Exception as e:
                 print(f"Warning: Failed to load calibration: {e}")
                 
@@ -96,6 +110,11 @@ class LKGControlPanel(QMainWindow):
         overrides["pitchOffset"] = self.pitch - self.base_pitch
         overrides["tiltOffset"] = self.tilt - self.base_tilt
         overrides["centerOffset"] = self.center - self.base_center
+        overrides["maxParallaxPx"] = self.maxParallaxPx
+        overrides["depthNear"] = self.depthNear
+        overrides["depthFar"] = self.depthFar
+        overrides["depthGamma"] = self.depthGamma
+        overrides["edgeFade"] = self.edgeFade
         
         with open(calib_path, 'w') as f:
             json.dump(data, f, indent=2)
@@ -162,6 +181,59 @@ class LKGControlPanel(QMainWindow):
         depth_layout.addLayout(btn_layout)
         
         layout.addWidget(depth_group)
+        
+        # === High Quality Settings ===
+        hq_group = QGroupBox("High Quality Settings")
+        hq_layout = QVBoxLayout(hq_group)
+        
+        # Max Parallax Px
+        parallax_row = QHBoxLayout()
+        parallax_row.addWidget(QLabel("Max Parallax (px):"))
+        self.parallax_spin = QDoubleSpinBox()
+        self.parallax_spin.setRange(0.0, 128.0)
+        self.parallax_spin.setSingleStep(1.0)
+        self.parallax_spin.setValue(self.maxParallaxPx)
+        self.parallax_spin.valueChanged.connect(self.update_params)
+        parallax_row.addWidget(self.parallax_spin)
+        hq_layout.addLayout(parallax_row)
+        
+        # Depth Near
+        self.near_label = QLabel(f"Depth Near: {self.depthNear:.2f}")
+        hq_layout.addWidget(self.near_label)
+        self.near_slider = QSlider(Qt.Horizontal)
+        self.near_slider.setRange(0, 100)
+        self.near_slider.setValue(int(self.depthNear * 100))
+        self.near_slider.valueChanged.connect(self.update_params)
+        hq_layout.addWidget(self.near_slider)
+        
+        # Depth Far
+        self.far_label = QLabel(f"Depth Far: {self.depthFar:.2f}")
+        hq_layout.addWidget(self.far_label)
+        self.far_slider = QSlider(Qt.Horizontal)
+        self.far_slider.setRange(0, 100)
+        self.far_slider.setValue(int(self.depthFar * 100))
+        self.far_slider.valueChanged.connect(self.update_params)
+        hq_layout.addWidget(self.far_slider)
+        
+        # Depth Gamma
+        self.gamma_label = QLabel(f"Depth Gamma: {self.depthGamma:.2f}")
+        hq_layout.addWidget(self.gamma_label)
+        self.gamma_slider = QSlider(Qt.Horizontal)
+        self.gamma_slider.setRange(1, 300)
+        self.gamma_slider.setValue(int(self.depthGamma * 100))
+        self.gamma_slider.valueChanged.connect(self.update_params)
+        hq_layout.addWidget(self.gamma_slider)
+        
+        # Edge Fade
+        self.edge_label = QLabel(f"Edge Fade (Denoise): {self.edgeFade:.2f}")
+        hq_layout.addWidget(self.edge_label)
+        self.edge_slider = QSlider(Qt.Horizontal)
+        self.edge_slider.setRange(0, 100)
+        self.edge_slider.setValue(int(self.edgeFade * 100))
+        self.edge_slider.valueChanged.connect(self.update_params)
+        hq_layout.addWidget(self.edge_slider)
+        
+        layout.addWidget(hq_group)
         
         # === Calibration Controls ===
         calib_group = QGroupBox("Calibration (Advanced)")
@@ -278,12 +350,22 @@ class LKGControlPanel(QMainWindow):
     def update_params(self):
         self.focus = self.focus_slider.value() / 100.0
         self.depthiness = self.depth_slider.value() / 100.0
+        self.maxParallaxPx = self.parallax_spin.value()
+        self.depthNear = self.near_slider.value() / 100.0
+        self.depthFar = self.far_slider.value() / 100.0
+        self.depthGamma = self.gamma_slider.value() / 100.0
+        self.edgeFade = self.edge_slider.value() / 100.0
+        
         self.pitch = self.pitch_spin.value()
         self.tilt = self.tilt_spin.value()
         self.center = self.center_spin.value()
         
         self.focus_label.setText(f"Focus: {self.focus:.2f}")
         self.depth_label.setText(f"Depthiness: {self.depthiness:.2f}")
+        self.near_label.setText(f"Depth Near: {self.depthNear:.2f}")
+        self.far_label.setText(f"Depth Far: {self.depthFar:.2f}")
+        self.gamma_label.setText(f"Depth Gamma: {self.depthGamma:.2f}")
+        self.edge_label.setText(f"Edge Fade (Denoise): {self.edgeFade:.2f}")
         
         # Send via UDP
         msg = {
@@ -296,7 +378,12 @@ class LKGControlPanel(QMainWindow):
             "pitch": self.pitch,
             "tilt": self.tilt,
             "center": self.center,
-            "flipSubp": self.flipSubp
+            "flipSubp": self.flipSubp,
+            "maxParallaxPx": self.maxParallaxPx,
+            "depthNear": self.depthNear,
+            "depthFar": self.depthFar,
+            "depthGamma": self.depthGamma,
+            "edgeFade": self.edgeFade
         }
         try:
             self.sock.sendto(json.dumps(msg).encode(), (self.udp_ip, self.udp_port))
@@ -307,6 +394,12 @@ class LKGControlPanel(QMainWindow):
         self.load_calibration()  # Re-load from file
         self.focus_slider.setValue(50)
         self.depth_slider.setValue(100)
+        self.parallax_spin.setValue(self.maxParallaxPx)
+        self.near_slider.setValue(int(self.depthNear * 100))
+        self.far_slider.setValue(int(self.depthFar * 100))
+        self.gamma_slider.setValue(int(self.depthGamma * 100))
+        self.edge_slider.setValue(int(self.edgeFade * 100))
+        
         self.swap_btn.setChecked(True)
         self.inv_btn.setChecked(True)
         self.inv_depth_btn.setChecked(False)

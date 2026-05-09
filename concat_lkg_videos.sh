@@ -68,7 +68,7 @@ for i in $(seq 0 $((idx-1))); do CONCAT_VA="${CONCAT_VA}[v$i][$i:a]"; done
 FILTER2="${FILTER2}${CONCAT_VA}concat=n=$idx:v=1:a=1[v][a]"
 
 echo "Starting concatenation for Display 2 (With audio)..."
-ffmpeg -y $INPUTS2 -filter_complex "$FILTER2" -map "[v]" -map "[a]" -c:v libx264 -crf 18 -pix_fmt yuv420p -c:a aac -b:a 192k "$OUT2"
+ffmpeg -y "${INPUTS2[@]}" -filter_complex "$FILTER2" -map "[v]" -map "[a]" -c:v libx264 -crf 18 -pix_fmt yuv420p -c:a aac -b:a 192k "$OUT2"
 
 echo "Concatenation complete!"
 echo "Generated: $OUT1"
