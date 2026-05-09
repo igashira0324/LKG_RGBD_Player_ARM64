@@ -342,6 +342,17 @@ class LKGPlayer:
         return None
 
     def load_calibration(self):
+        def normalize_serial_key(s):
+            return (
+                str(s).strip()
+                .replace("\u2010", "-")
+                .replace("\u2011", "-")
+                .replace("\u2012", "-")
+                .replace("\u2013", "-")
+                .replace("\u2014", "-")
+                .replace("\u2212", "-")
+            )
+
         def load_json_if_exists(path):
             if path and os.path.exists(path):
                 with open(path, "r") as f:
@@ -401,10 +412,10 @@ class LKGPlayer:
         self.screen_h = screen_h
         
         # Serial for device-specific overrides
-        serial = str(get_calib_value(config, "serial", "")).strip()
-        if not serial:
-            serial = os.path.splitext(os.path.basename(calib_file))[0]
-        self.serial = serial or "default"
+        serial_raw = str(get_calib_value(config, "serial", "")).strip()
+        if not serial_raw:
+            serial_raw = os.path.splitext(os.path.basename(calib_file))[0]
+        self.serial = normalize_serial_key(serial_raw) or "default"
         
         # Overrides
         common_overrides = override_data.get('runtimeOverride', {})
@@ -426,6 +437,14 @@ class LKGPlayer:
         self.edgeFade = float(common_overrides.get("edgeFade", self.edgeFade))
         
         print(f"Calibration source: {calib_file}")
+        print(f"Serial key: {self.serial}")
+        if self.serial in override_data.get('deviceOverride', {}):
+            print(f"Applying deviceOverride[{self.serial}] (Legacy runtimeOverride offsets ignored)")
+        elif any(k in common_overrides for k in ["pitchOffset", "tiltOffset", "centerOffset"]):
+            print(f"deviceOverride[{self.serial}] not found. Applying legacy runtimeOverride offsets.")
+        else:
+            print(f"No calibration offsets found for {self.serial}.")
+
         print(f"Raw calibration: pitch={raw_pitch:.4f}, slope={raw_slope:.4f}, center={raw_center:.4f}, dpi={dpi}, screen={screen_w}x{screen_h}")
         print(f"Shader calibration: pitch={self.pitch:.4f}, tilt={self.tilt:.4f}, center={self.center:.4f}, subp={self.subp:.6f}")
         print(f"Loaded combined calibration. Serial: {self.serial}")

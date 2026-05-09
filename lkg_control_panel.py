@@ -84,6 +84,17 @@ class LKGControlPanel(QMainWindow):
         return None
 
     def load_calibration(self):
+        def normalize_serial_key(s):
+            return (
+                str(s).strip()
+                .replace("\u2010", "-")
+                .replace("\u2011", "-")
+                .replace("\u2012", "-")
+                .replace("\u2013", "-")
+                .replace("\u2014", "-")
+                .replace("\u2212", "-")
+            )
+        
         """Load calibration defaults and runtime overrides."""
         def load_json_if_exists(path):
             if path and os.path.exists(path):
@@ -137,10 +148,10 @@ class LKGControlPanel(QMainWindow):
         self.base_tilt = screen_h / (screen_w * raw_slope)
         self.base_center = raw_center
         
-        serial = str(get_calib_value(config, "serial", "")).strip()
-        if not serial:
-            serial = os.path.splitext(os.path.basename(calib_file))[0]
-        self.serial = serial or "default"
+        serial_raw = str(get_calib_value(config, "serial", "")).strip()
+        if not serial_raw:
+            serial_raw = os.path.splitext(os.path.basename(calib_file))[0]
+        self.serial = normalize_serial_key(serial_raw) or "default"
         
         # Overrides
         common_overrides = override_data.get('runtimeOverride', {})

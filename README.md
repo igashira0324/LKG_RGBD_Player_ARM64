@@ -14,6 +14,8 @@ NVIDIA DGX SPARK (ARM64) 環境において、Looking Glass Go をスタンド�
 2. Looking Glass Go 本体内の `LKG_calibration/visual.json`
 3. リポジトリ内の `lkg_calibration.json` (主に runtimeOverride 保存用)
 
+**補足**: キャリブレーションファイルが一切見つからない場合、Looking Glass Go の標準値（Pitch=49.818等）が適用され、その上で `lkg_calibration.json` のオーバーライドが適用されます。
+
 **自動変換**: 読み込まれた `raw pitch` / `slope` は、光学計算に基づきシェーダー用の `shader pitch` / `tilt` へ自動変換されます。
 
 ### B. 実行時オーバーライド (Runtime Overrides)
@@ -34,9 +36,9 @@ NVIDIA DGX SPARK (ARM64) 環境において、Looking Glass Go をスタンド�
 - **単位**: Display Pixel (画面上のピクセル数)
 - **仕様**: 入力動画の解像度に関わらず、画面上で何ピクセル分の視差（ズレ）を許容するかを定義します。
 - **推奨運用範囲**: 
-  - `Max Parallax`: `2.0` 〜 `5.0` (視覚的に自然で破綻の少ない立体感)
-  - `Depthiness`: `0.5` 〜 `1.5`
-- **仕様**: スライダー (0.0 〜 5.0) で、Max Parallax の範囲内で立体感の強弱を調整します。現在の簡易 DIBR 方式では 2.0 以上は破綻が目立ちやすいため注意してください。
+  - `安定推奨`: `2.0` 〜 `3.0` display px (破綻が少なく高品質な表示)
+  - `実験範囲`: `3.0` 〜 `5.0` display px (奥行きは増しますが、輪郭のノイズが目立ちやすくなります)
+- **注意**: 現在の簡易 DIBR 方式では 3.0 以上を設定すると、前景の裏側の欠落によるテアリングが発生しやすくなります。深度マップの品質に合わせて調整してください。
 
 ## 4. 運用・実行方法
 
