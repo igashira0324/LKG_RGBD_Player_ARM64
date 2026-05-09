@@ -6,7 +6,7 @@ import math
 import os
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QSlider, QLabel, QPushButton, QGroupBox,
-                             QDoubleSpinBox)
+                             QDoubleSpinBox, QComboBox)
 from PySide6.QtCore import Qt
 
 class LKGControlPanel(QMainWindow):
@@ -29,6 +29,7 @@ class LKGControlPanel(QMainWindow):
         self.invertDepth = 0
         self.testPattern = 0
         self.flipSubp = 0
+        self.debugMode = 0
         
         # High Quality Parameters
         self.maxParallaxPx = 2.5
@@ -288,7 +289,14 @@ class LKGControlPanel(QMainWindow):
         center_row.addWidget(self.center_spin)
         calib_layout.addLayout(center_row)
         
-        layout.addWidget(calib_group)
+        # Debug Mode
+        debug_row = QHBoxLayout()
+        debug_row.addWidget(QLabel("Render Mode:"))
+        self.debug_combo = QComboBox()
+        self.debug_combo.addItems(["Normal", "RGB Only (2D)", "Depth Only", "Offset Heatmap"])
+        self.debug_combo.currentIndexChanged.connect(self.update_params)
+        debug_row.addWidget(self.debug_combo)
+        layout.addLayout(debug_row)
         
         # Test Pattern Toggle
         self.test_btn = QPushButton("TOGGLE TEST PATTERN")
@@ -377,6 +385,7 @@ class LKGControlPanel(QMainWindow):
         self.pitch = self.pitch_spin.value()
         self.tilt = self.tilt_spin.value()
         self.center = self.center_spin.value()
+        self.debugMode = self.debug_combo.currentIndex()
         
         self.focus_label.setText(f"Focus: {self.focus:.2f}")
         self.depth_label.setText(f"Depthiness: {self.depthiness:.2f}")
@@ -403,7 +412,8 @@ class LKGControlPanel(QMainWindow):
             "depthFar": self.depthFar,
             "depthGamma": self.depthGamma,
             "edgeFade": self.edgeFade,
-            "depthSmooth": self.depthSmooth
+            "depthSmooth": self.depthSmooth,
+            "debugMode": self.debugMode
         }
         try:
             self.sock.sendto(json.dumps(msg).encode(), (self.udp_ip, self.udp_port))

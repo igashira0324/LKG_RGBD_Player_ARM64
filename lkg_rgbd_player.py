@@ -56,7 +56,6 @@ uniform float depthFar;
 uniform float depthGamma;
 uniform float edgeFade;
 uniform float edgeLow;
-uniform float edgeHigh;
 uniform float depthSmooth;
 uniform vec2 texelSize;
 
@@ -65,6 +64,7 @@ uniform int invView;
 uniform int flipSubp;
 uniform int invertDepth;
 uniform int testPattern;
+uniform int debugMode; // 0=Normal, 1=RGB Only, 2=Depth Only, 3=Offset Heatmap
 
 float readDepth(vec2 uv) {
     float d = texture(texRGBD, uv).r;
@@ -87,10 +87,23 @@ void main() {
     vec3 color;
     
     if (testPattern == 1) {
-        // Simple stripe test pattern for pitch calibration
-        float phase = TexCoord.x * pitch - center;
-        float stripe = step(0.5, fract(phase));
-        FragColor = vec4(vec3(stripe), 1.0);
+        // High-fidelity test pattern using interleaving logic
+        vec3 testColor;
+        for (int i = 0; i < 3; i++) {
+            float subpixelIndex = float(i);
+            if (flipSubp == 1) subpixelIndex = 2.0 - subpixelIndex;
+
+            float phase = (TexCoord.x + (1.0 - TexCoord.y) * tilt) * pitch - center;
+            phase += subpixelIndex * subp;
+            float v = fract(phase);
+            if (invView == 1) v = 1.0 - v;
+
+            float stripe = step(0.5, v);
+            if (i == 0) testColor.r = stripe;
+            else if (i == 1) testColor.g = stripe;
+            else testColor.b = stripe;
+        }
+        FragColor = vec4(testColor, 1.0);
         return;
     }
 
@@ -138,6 +151,11 @@ void main() {
         
         float d = getSmoothDepth(depth_uv);
 
+        if (debugMode == 2) { // Depth Only
+            FragColor = vec4(vec3(d), 1.0);
+            return;
+        }
+
         // --- Depth Remapping ---
         float nearVal = min(depthNear, depthFar - 0.001);
         float farVal = max(depthFar, depthNear + 0.001);
@@ -156,7 +174,15 @@ void main() {
         // Reduce offset at edges to hide artifacts
         offset *= mix(1.0, 1.0 - edgeFade, edge);
         
+        if (debugMode == 3) { // Offset Heatmap
+            float o = abs(offset) / max(parallaxScale, 0.0001);
+            FragColor = vec4(o, 0.0, 1.0 - o, 1.0);
+            return;
+        }
+
         vec2 warped_uv = rgb_uv + vec2(offset, 0.0);
+        if (debugMode == 1) warped_uv = rgb_uv; // RGB Only (2D)
+        
         warped_uv.x = clamp(warped_uv.x, rgb_min_x, rgb_max_x);
         
         if (i == 0) color.r = texture(texRGBD, warped_uv).r;
@@ -192,6 +218,7 @@ class LKGPlayer:
         self.edgeHigh = 0.10
         self.depthLoc = args.depth_loc
         self.udp_port = 5005
+        self.debugMode = 0
         
         # Calibration defaults for LKG Go (Shader coordinates)
         self.pitch = 143.6
@@ -254,6 +281,10 @@ class LKGPlayer:
                         self.edgeFade = float(msg['edgeFade'])
                     if 'depthSmooth' in msg:
                         self.depthSmooth = float(msg['depthSmooth'])
+                    if 'debugMode' in msg:
+                        self.debugMode = int(msg['debugMode'])
+                    
+                    self.print_runtime_params("UDP")
                 except socket.timeout:
                     continue
                 except Exception as e:
@@ -264,14 +295,42 @@ class LKGPlayer:
         t = threading.Thread(target=udp_loop, daemon=True)
         t.start()
 
+        t.start()
+
+    def print_runtime_params(self, prefix="Runtime"):
+        print(f"[{prefix}] Mode={self.debugMode} Depthiness={self.depthiness:.2f} MaxParallax={self.maxParallaxPx:.2f} PScale={self.parallaxScale:.5f}")
+        print(f"[{prefix}] Near={self.depthNear:.2f} Far={self.depthFar:.2f} Gamma={self.depthGamma:.2f} Smooth={self.depthSmooth:.2f} EdgeFade={self.edgeFade:.2f}")
+
+    def discover_factory_calibration(self):
+        """Search for visual.json on mounted Looking Glass drives."""
+        search_paths = [
+            "/media", "/mnt", f"/run/media/{os.getlogin()}"
+        ]
+        for base in search_paths:
+            if not os.path.exists(base): continue
+            try:
+                for drive in os.listdir(base):
+                    full_path = os.path.join(base, drive, "LKG_calibration", "visual.json")
+                    if os.path.exists(full_path):
+                        return full_path
+            except:
+                continue
+        return None
+
     def load_calibration(self):
         calib_file = self.args.calib_file
         
         if not calib_file:
-            script_dir = os.path.dirname(os.path.abspath(__file__))
-            default_path = os.path.join(script_dir, "lkg_calibration.json")
-            if os.path.exists(default_path):
-                calib_file = default_path
+            # First try discovering factory calibration
+            factory_path = self.discover_factory_calibration()
+            if factory_path:
+                print(f"Found factory calibration: {factory_path}")
+                calib_file = factory_path
+            else:
+                script_dir = os.path.dirname(os.path.abspath(__file__))
+                default_path = os.path.join(script_dir, "lkg_calibration.json")
+                if os.path.exists(default_path):
+                    calib_file = default_path
         
         if calib_file and os.path.exists(calib_file):
             try:
@@ -295,14 +354,16 @@ class LKGPlayer:
                     self.center = raw_center
                     self.subp = self.pitch / (3.0 * screen_w)
                     
-                    # Apply runtime overrides if any
-                    overrides = data.get('runtimeOverride', {})
-                    self.pitch += float(overrides.get("pitchOffset", 0.0))
-                    self.tilt += float(overrides.get("tiltOffset", 0.0))
-                    self.center += float(overrides.get("centerOffset", 0.0))
+                    self.maxParallaxPx = float(overrides.get("maxParallaxPx", self.maxParallaxPx))
+                    self.depthNear = float(overrides.get("depthNear", self.depthNear))
+                    self.depthFar = float(overrides.get("depthFar", self.depthFar))
+                    self.depthGamma = float(overrides.get("depthGamma", self.depthGamma))
+                    self.depthSmooth = float(overrides.get("depthSmooth", self.depthSmooth))
+                    self.edgeFade = float(overrides.get("edgeFade", self.edgeFade))
                     
                     print(f"Loaded calibration from {calib_file}")
-                    print(f"  shader_pitch={self.pitch:.3f}, shader_tilt={self.tilt:.3f}, center={self.center:.3f}, invView={self.invView}")
+                    print(f"  Pitch={raw_pitch:.3f}, Slope={raw_slope:.3f}, Center={raw_center:.3f}, DPI={dpi}")
+                    print(f"  Shader: Pitch={self.pitch:.3f}, Tilt={self.tilt:.3f}, Center={self.center:.3f}, Subp={self.subp:.6f}")
             except Exception as e:
                 print(f"Warning: Failed to load calibration: {e}")
         else:
@@ -484,6 +545,7 @@ class LKGPlayer:
             self.frame_w, self.frame_h, fps = self.get_video_info(self.args.input)
             print(f"Video resolution: {self.frame_w}x{self.frame_h} @ {fps:.2f} FPS")
             self.parallaxScale = self.maxParallaxPx / float(self.frame_w)
+            self.print_runtime_params("STARTUP")
             self.start_video(self.args.input)
 
         frame_w, frame_h = self.frame_w, self.frame_h
@@ -561,6 +623,7 @@ class LKGPlayer:
             GL.glUniform1i(GL.glGetUniformLocation(self.shader_program, "flipSubp"), self.flipSubp)
             GL.glUniform1i(GL.glGetUniformLocation(self.shader_program, "invertDepth"), self.invertDepth)
             GL.glUniform1i(GL.glGetUniformLocation(self.shader_program, "testPattern"), self.testPattern)
+            GL.glUniform1i(GL.glGetUniformLocation(self.shader_program, "debugMode"), self.debugMode)
             
             GL.glBindVertexArray(self.vao)
             GL.glDrawArrays(GL.GL_TRIANGLES, 0, 6)
