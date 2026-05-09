@@ -2,6 +2,8 @@ import sys
 import json
 import socket
 import argparse
+import math
+import os
 from PySide6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                              QHBoxLayout, QSlider, QLabel, QPushButton, QGroupBox,
                              QDoubleSpinBox)
@@ -12,7 +14,7 @@ class LKGControlPanel(QMainWindow):
         super().__init__()
         self.setWindowTitle(f"Looking Glass Go - Control Panel (Monitor {monitor_index})")
         self.setFixedWidth(520)
-        self.setFixedHeight(700)
+        self.setFixedHeight(750)
         
         # UDP Setup
         self.udp_ip = "127.0.0.1"
@@ -24,9 +26,19 @@ class LKGControlPanel(QMainWindow):
         self.depthiness = 1.0
         self.invView = 1
         self.depthLoc = 3  # 3=Depth on Right (ComfyUI default)
-        self.pitch = 47.5
-        self.slope = -5.5
-        self.center = 0.0
+        self.invertDepth = 0
+        self.testPattern = 0
+        self.flipSubp = 0
+        
+        # Base values from factory config
+        self.base_pitch = 143.6
+        self.base_tilt = -0.324
+        self.base_center = 0.0
+        
+        # Final values = base + offset
+        self.pitch = self.base_pitch
+        self.tilt = self.base_tilt
+        self.center = self.base_center
         
         # Load calibration defaults
         self.load_calibration()
@@ -35,22 +47,60 @@ class LKGControlPanel(QMainWindow):
         self.apply_styles()
 
     def load_calibration(self):
-        """Load calibration defaults from lkg_calibration.json if available."""
-        import os
+        """Load calibration defaults and runtime overrides."""
         calib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lkg_calibration.json")
         if os.path.exists(calib_path):
             try:
                 with open(calib_path, 'r') as f:
                     data = json.load(f)
+                    
+                    # Read base config
                     config = data.get('configValue', {})
-                    self.pitch = config.get('pitch', {}).get('value', self.pitch)
-                    self.slope = config.get('slope', {}).get('value', self.slope)
-                    self.center = config.get('center', {}).get('value', self.center)
-                    inv = config.get('invView', {}).get('value', None)
-                    if inv is not None:
-                        self.invView = int(inv)
+                    raw_pitch = float(config.get("pitch", {}).get("value", 49.818))
+                    raw_slope = float(config.get("slope", {}).get("value", -5.48))
+                    raw_center = float(config.get("center", {}).get("value", 0.157))
+                    screen_w = float(config.get("screenW", {}).get("value", 1440.0))
+                    screen_h = float(config.get("screenH", {}).get("value", 2560.0))
+                    dpi = float(config.get("DPI", {}).get("value", 491.0))
+                    
+                    self.invView = int(config.get("invView", {}).get("value", self.invView))
+                    self.flipSubp = int(config.get("flipSubp", {}).get("value", self.flipSubp))
+                    
+                    # Calculate shader bases
+                    screen_inches = screen_w / dpi
+                    self.base_pitch = raw_pitch * screen_inches * math.cos(math.atan(1.0 / raw_slope))
+                    self.base_tilt = screen_h / (screen_w * raw_slope)
+                    self.base_center = raw_center
+                    
+                    # Read overrides
+                    overrides = data.get('runtimeOverride', {})
+                    pitchOffset = float(overrides.get("pitchOffset", 0.0))
+                    tiltOffset = float(overrides.get("tiltOffset", 0.0))
+                    centerOffset = float(overrides.get("centerOffset", 0.0))
+                    
+                    # Set finals
+                    self.pitch = self.base_pitch + pitchOffset
+                    self.tilt = self.base_tilt + tiltOffset
+                    self.center = self.base_center + centerOffset
             except Exception as e:
                 print(f"Warning: Failed to load calibration: {e}")
+                
+    def save_calibration(self):
+        calib_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lkg_calibration.json")
+        data = {}
+        if os.path.exists(calib_path):
+            with open(calib_path, 'r') as f:
+                data = json.load(f)
+                
+        overrides = data.setdefault("runtimeOverride", {})
+        overrides["pitchOffset"] = self.pitch - self.base_pitch
+        overrides["tiltOffset"] = self.tilt - self.base_tilt
+        overrides["centerOffset"] = self.center - self.base_center
+        
+        with open(calib_path, 'w') as f:
+            json.dump(data, f, indent=2)
+            
+        print(f"Saved calibration offsets to {calib_path}")
         
     def init_ui(self):
         central_widget = QWidget()
@@ -102,6 +152,13 @@ class LKGControlPanel(QMainWindow):
         self.inv_btn.setChecked(self.invView == 1)
         self.inv_btn.clicked.connect(self.toggle_inv)
         btn_layout.addWidget(self.inv_btn)
+        
+        self.inv_depth_btn = QPushButton("INVERT DEPTH")
+        self.inv_depth_btn.setCheckable(True)
+        self.inv_depth_btn.setChecked(self.invertDepth == 1)
+        self.inv_depth_btn.clicked.connect(self.toggle_inv_depth)
+        btn_layout.addWidget(self.inv_depth_btn)
+        
         depth_layout.addLayout(btn_layout)
         
         layout.addWidget(depth_group)
@@ -112,27 +169,27 @@ class LKGControlPanel(QMainWindow):
         
         # Pitch
         pitch_row = QHBoxLayout()
-        pitch_row.addWidget(QLabel("Pitch:"))
+        pitch_row.addWidget(QLabel("Shader Pitch:"))
         self.pitch_spin = QDoubleSpinBox()
         self.pitch_spin.setRange(1.0, 300.0)
         self.pitch_spin.setSingleStep(0.05)
-        self.pitch_spin.setDecimals(2)
+        self.pitch_spin.setDecimals(3)
         self.pitch_spin.setValue(self.pitch)
         self.pitch_spin.valueChanged.connect(self.update_params)
         pitch_row.addWidget(self.pitch_spin)
         calib_layout.addLayout(pitch_row)
         
-        # Slope
-        slope_row = QHBoxLayout()
-        slope_row.addWidget(QLabel("Slope:"))
-        self.slope_spin = QDoubleSpinBox()
-        self.slope_spin.setRange(-10.0, 0.0)
-        self.slope_spin.setSingleStep(0.05)
-        self.slope_spin.setDecimals(3)
-        self.slope_spin.setValue(self.slope)
-        self.slope_spin.valueChanged.connect(self.update_params)
-        slope_row.addWidget(self.slope_spin)
-        calib_layout.addLayout(slope_row)
+        # Tilt
+        tilt_row = QHBoxLayout()
+        tilt_row.addWidget(QLabel("Shader Tilt:"))
+        self.tilt_spin = QDoubleSpinBox()
+        self.tilt_spin.setRange(-2.0, 2.0)
+        self.tilt_spin.setSingleStep(0.01)
+        self.tilt_spin.setDecimals(3)
+        self.tilt_spin.setValue(self.tilt)
+        self.tilt_spin.valueChanged.connect(self.update_params)
+        tilt_row.addWidget(self.tilt_spin)
+        calib_layout.addLayout(tilt_row)
         
         # Center
         center_row = QHBoxLayout()
@@ -148,14 +205,26 @@ class LKGControlPanel(QMainWindow):
         
         layout.addWidget(calib_group)
         
-        # Spacer
-        layout.addStretch()
+        # Test Pattern Toggle
+        self.test_btn = QPushButton("TOGGLE TEST PATTERN")
+        self.test_btn.setCheckable(True)
+        self.test_btn.setChecked(self.testPattern == 1)
+        self.test_btn.clicked.connect(self.toggle_test_pattern)
+        layout.addWidget(self.test_btn)
         
-        # Reset Button
+        # Buttons layout
+        action_layout = QHBoxLayout()
+        self.save_btn = QPushButton("SAVE CALIBRATION")
+        self.save_btn.setFixedHeight(45)
+        self.save_btn.clicked.connect(self.save_calibration)
+        action_layout.addWidget(self.save_btn)
+        
         self.reset_btn = QPushButton("RESET TO DEFAULT")
         self.reset_btn.setFixedHeight(45)
         self.reset_btn.clicked.connect(self.reset_defaults)
-        layout.addWidget(self.reset_btn)
+        action_layout.addWidget(self.reset_btn)
+        
+        layout.addLayout(action_layout)
 
     def apply_styles(self):
         self.setStyleSheet("""
@@ -197,12 +266,20 @@ class LKGControlPanel(QMainWindow):
     def toggle_inv(self):
         self.invView = 1 if self.inv_btn.isChecked() else 0
         self.update_params()
+        
+    def toggle_inv_depth(self):
+        self.invertDepth = 1 if self.inv_depth_btn.isChecked() else 0
+        self.update_params()
+        
+    def toggle_test_pattern(self):
+        self.testPattern = 1 if self.test_btn.isChecked() else 0
+        self.update_params()
 
     def update_params(self):
         self.focus = self.focus_slider.value() / 100.0
         self.depthiness = self.depth_slider.value() / 100.0
         self.pitch = self.pitch_spin.value()
-        self.slope = self.slope_spin.value()
+        self.tilt = self.tilt_spin.value()
         self.center = self.center_spin.value()
         
         self.focus_label.setText(f"Focus: {self.focus:.2f}")
@@ -214,9 +291,12 @@ class LKGControlPanel(QMainWindow):
             "depthiness": self.depthiness,
             "invView": self.invView,
             "depthLoc": self.depthLoc,
+            "invertDepth": self.invertDepth,
+            "testPattern": self.testPattern,
             "pitch": self.pitch,
-            "slope": self.slope,
-            "center": self.center
+            "tilt": self.tilt,
+            "center": self.center,
+            "flipSubp": self.flipSubp
         }
         try:
             self.sock.sendto(json.dumps(msg).encode(), (self.udp_ip, self.udp_port))
@@ -229,10 +309,14 @@ class LKGControlPanel(QMainWindow):
         self.depth_slider.setValue(100)
         self.swap_btn.setChecked(True)
         self.inv_btn.setChecked(True)
+        self.inv_depth_btn.setChecked(False)
+        self.test_btn.setChecked(False)
         self.depthLoc = 3
         self.invView = 1
+        self.invertDepth = 0
+        self.testPattern = 0
         self.pitch_spin.setValue(self.pitch)
-        self.slope_spin.setValue(self.slope)
+        self.tilt_spin.setValue(self.tilt)
         self.center_spin.setValue(self.center)
         self.update_params()
 

@@ -10,16 +10,23 @@ BASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # PLAYER_DIR is the location of the player engine and environment
 PLAYER_DIR="$BASE_DIR"
 
-# Video files (relative to BASE_DIR)
+# Default Video files (relative to BASE_DIR)
 V1_FILE="display2_combined.mp4"
 V2_FILE="display1_combined.mp4"
 
-V1="$BASE_DIR/$V1_FILE"
-V2="$BASE_DIR/$V2_FILE"
-
-# Calibration files (remain in shared directory)
+# Default Calibration files (remain in shared directory if not overridden)
 CALIB1="/home/nttdmse/share/calibration/LKG-E12651.json" # Monitor 1 (HDMI 2)
 CALIB2="/home/nttdmse/share/calibration/LKG-E12592.json" # Monitor 2 (HDMI 1)
+DISPLAY_NUM="${DISPLAY:-:1}"
+
+# Load configuration if available
+CONFIG_FILE="$BASE_DIR/lkg_sync_config.env"
+if [ -f "$CONFIG_FILE" ]; then
+    source "$CONFIG_FILE"
+fi
+
+V1="$BASE_DIR/$V1_FILE"
+V2="$BASE_DIR/$V2_FILE"
 
 SYNC_FILE="/tmp/lkg_sync_go"
 DONE1="/tmp/lkg_p1_done"
@@ -52,7 +59,7 @@ else
     echo "Warning: lkg-env not found, using system python"
 fi
 
-export DISPLAY=${DISPLAY:-:1}
+export DISPLAY=$DISPLAY_NUM
 
 echo "================================================"
 echo "Starting Synchronized Playback"

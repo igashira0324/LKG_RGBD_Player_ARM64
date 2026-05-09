@@ -24,18 +24,20 @@ if [[ ! -d "$D1_DIR" || ! -d "$D2_DIR" ]]; then
     exit 1
 fi
 
+shopt -s nullglob
+
 echo "Gathering files for Display 1..."
-D1_FILES=$(ls "$D1_DIR"/*.mp4 | sort)
-if [[ -z "$D1_FILES" ]]; then
+D1_FILES=("$D1_DIR"/*.mp4)
+if (( ${#D1_FILES[@]} == 0 )); then
     echo "Error: No mp4 files found in $D1_DIR"
     exit 1
 fi
 
 FILTER1=""
-INPUTS1=""
+INPUTS1=()
 idx=0
-for f in $D1_FILES; do
-    INPUTS1="$INPUTS1 -i $f"
+for f in "${D1_FILES[@]}"; do
+    INPUTS1+=("-i" "$f")
     FILTER1="$FILTER1[$idx:v]scale=1152:1024[v$idx];"
     idx=$((idx+1))
 done
@@ -44,20 +46,20 @@ for i in $(seq 0 $((idx-1))); do CONCAT_V="${CONCAT_V}[v$i]"; done
 FILTER1="${FILTER1}${CONCAT_V}concat=n=$idx:v=1:a=0[v]"
 
 echo "Starting concatenation for Display 1 (Visual only)..."
-ffmpeg -y $INPUTS1 -filter_complex "$FILTER1" -map "[v]" -c:v libx264 -crf 18 -pix_fmt yuv420p "$OUT1"
+ffmpeg -y "${INPUTS1[@]}" -filter_complex "$FILTER1" -map "[v]" -c:v libx264 -crf 18 -pix_fmt yuv420p "$OUT1"
 
 echo "Gathering files for Display 2..."
-D2_FILES=$(ls "$D2_DIR"/*.mp4 | sort)
-if [[ -z "$D2_FILES" ]]; then
+D2_FILES=("$D2_DIR"/*.mp4)
+if (( ${#D2_FILES[@]} == 0 )); then
     echo "Error: No mp4 files found in $D2_DIR"
     exit 1
 fi
 
 FILTER2=""
-INPUTS2=""
+INPUTS2=()
 idx=0
-for f in $D2_FILES; do
-    INPUTS2="$INPUTS2 -i $f"
+for f in "${D2_FILES[@]}"; do
+    INPUTS2+=("-i" "$f")
     FILTER2="$FILTER2[$idx:v]scale=1152:1024[v$idx];"
     idx=$((idx+1))
 done

@@ -85,16 +85,16 @@ if [ "$GUI_ONLY" = true ]; then
     echo "Running in GUI ONLY mode (No Player)."
 else
     # Build player command with proper flags
-    PLAYER_ARGS="$INPUT_FILE --monitor $MONITOR --loop --depth-loc 3"
+    PLAYER_ARGS=("$INPUT_FILE" --monitor "$MONITOR" --loop --depth-loc 3)
     
     # Add calibration file if exists
     if [ -f "$CALIB_FILE" ]; then
-        PLAYER_ARGS="$PLAYER_ARGS --calib-file $CALIB_FILE"
+        PLAYER_ARGS+=(--calib-file "$CALIB_FILE")
     fi
     
     # Start the Player in the background
     echo "Starting player: $INPUT_FILE on Monitor $MONITOR"
-    $VENV_PYTHON $PLAYER_SCRIPT $PLAYER_ARGS &
+    "$VENV_PYTHON" "$PLAYER_SCRIPT" "${PLAYER_ARGS[@]}" &
     PLAYER_PID=$!
     
     # Wait for player to initialize
