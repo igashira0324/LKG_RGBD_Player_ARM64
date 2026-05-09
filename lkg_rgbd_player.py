@@ -260,6 +260,10 @@ QUILT_FRAGMENT_SHADER = """
 out vec4 FragColor;
 in vec2 TexCoord;
 
+uniform float pitch;
+uniform float tilt;
+uniform float center;
+uniform float subp;
 uniform int flipSubp;
 uniform int invView;
 uniform int debugFixedView; // -1 for off, >=0 for fixed view index
