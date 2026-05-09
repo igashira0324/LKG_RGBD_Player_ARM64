@@ -322,7 +322,6 @@ class LKGPlayer:
             with open(calib_file, 'r', encoding='utf-8') as f: config = json.load(f)
             raw_pitch = self.get_calib_value(config, "pitch", 49.818); raw_slope = self.get_calib_value(config, "slope", -5.48)
             raw_center = self.get_calib_value(config, "center", 0.157)
-            # Safe DPI fallback
             dpi = self.get_calib_value(config, "DPI", self.get_calib_value(config, "dpi", 491.0))
             screen_w = self.get_calib_value(config, "screenW", 1440.0); screen_h = self.get_calib_value(config, "screenH", 2560.0)
             raw_serial = config.get("serial")
@@ -432,7 +431,6 @@ class LKGPlayer:
         probe = subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", self.args.input]).decode().strip()
         vw, vh = map(int, probe.split(','))
         
-        # --- Detailed Startup Log ---
         print(f"[PIPELINE] {self.pipeline}")
         print(f"[INPUT] file={os.path.basename(self.args.input)} resolution={vw}x{vh} static={is_static}")
         if self.pipeline == "quilt":
@@ -458,25 +456,31 @@ class LKGPlayer:
             if not is_static:
                 raw_frame = proc.stdout.read(vw * vh * 3)
                 if not raw_frame or len(raw_frame) < (vw * vh * 3):
-                    if self.args.loop: proc.terminate(); proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8); continue
+                    if self.args.loop:
+                        proc.terminate()
+                        try: proc.wait(timeout=1.0)
+                        except: proc.kill()
+                        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8); continue
                     else: break
                 GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGB, vw, vh, 0, GL.GL_RGB, GL.GL_UNSIGNED_BYTE, raw_frame)
             prog = self.prog_quilt if self.pipeline == "quilt" else self.prog_rgbd
             GL.glUseProgram(prog); GL.glActiveTexture(GL.GL_TEXTURE0); GL.glBindTexture(GL.GL_TEXTURE_2D, tex)
             
-            # --- Fixed set_f / set_i functions ---
             def set_f(name, val):
                 loc = GL.glGetUniformLocation(prog, name)
                 if loc != -1: GL.glUniform1f(loc, val)
             def set_i(name, val):
                 loc = GL.glGetUniformLocation(prog, name)
                 if loc != -1: GL.glUniform1i(loc, val)
+            def set_vec2(name, x, y):
+                loc = GL.glGetUniformLocation(prog, name)
+                if loc != -1: GL.glUniform2f(loc, x, y)
 
             set_f("pitch", self.pitch); set_f("tilt", self.tilt); set_f("center", self.center); set_f("subp", self.subp); set_i("flipSubp", self.flipSubp); set_i("invView", self.invView)
             if self.pipeline == "quilt":
                 set_i("texQuilt", 0); c = self.quilt_cfg; set_i("quiltCols", c.cols); set_i("quiltRows", c.rows); set_i("quiltViews", c.views); set_f("quiltAspect", c.aspect); set_f("inputAspect", float(vw)/float(vh)); set_i("quiltFit", c.fit); set_i("quiltFlipRows", c.flip_rows); set_i("debugFixedView", c.fixed_view); set_f("quiltZoom", c.zoom); set_f("overscan", c.overscan)
             else:
-                set_i("texRGBD", 0); set_f("focus", self.focus); set_f("depthiness", self.depthiness); set_f("parallaxScale", self.parallaxScale); set_f("depthNear", self.depthNear); set_f("depthFar", self.depthFar); set_f("depthGamma", self.depthGamma); set_f("depthSmooth", self.depthSmooth); set_f("depthContrast", self.depthContrast); set_f("edgeFade", self.edgeFade); set_f("edgeLow", self.edgeLow); set_f("edgeHigh", self.edgeHigh); set_i("depthLoc", self.depthLoc); set_i("invertDepth", self.invertDepth); set_i("debugMode", self.debugMode); GL.glUniform2f(GL.glGetUniformLocation(prog, "texelSize"), 1.0/float(vw), 1.0/float(vh))
+                set_i("texRGBD", 0); set_f("focus", self.focus); set_f("depthiness", self.depthiness); set_f("parallaxScale", self.parallaxScale); set_f("depthNear", self.depthNear); set_f("depthFar", self.depthFar); set_f("depthGamma", self.depthGamma); set_f("depthSmooth", self.depthSmooth); set_f("depthContrast", self.depthContrast); set_f("edgeFade", self.edgeFade); set_f("edgeLow", self.edgeLow); set_f("edgeHigh", self.edgeHigh); set_i("depthLoc", self.depthLoc); set_i("invertDepth", self.invertDepth); set_i("debugMode", self.debugMode); set_vec2("texelSize", 1.0/float(vw), 1.0/float(vh))
             GL.glClear(GL.GL_COLOR_BUFFER_BIT); GL.glDrawArrays(GL.GL_TRIANGLES, 0, 6)
             glfw.swap_buffers(self.window); glfw.poll_events()
         
