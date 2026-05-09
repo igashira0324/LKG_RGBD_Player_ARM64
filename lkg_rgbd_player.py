@@ -420,6 +420,12 @@ class LKGPlayer:
         glfw.make_context_current(self.window)
         glfw.swap_interval(1)
         
+        # Window / Framebuffer size check
+        win_w, win_h = glfw.get_window_size(self.window)
+        fb_w, fb_h = glfw.get_framebuffer_size(self.window)
+        print(f"[WINDOW] window={win_w}x{win_h} framebuffer={fb_w}x{fb_h}")
+        GL.glViewport(0, 0, fb_w, fb_h)
+        
         # Init Shaders
         vs = shaders.compileShader(VERTEX_SHADER, GL.GL_VERTEX_SHADER)
         fs_rgbd = shaders.compileShader(FRAGMENT_SHADER, GL.GL_FRAGMENT_SHADER)
@@ -427,7 +433,7 @@ class LKGPlayer:
         self.prog_rgbd = shaders.compileProgram(vs, fs_rgbd)
         self.prog_quilt = shaders.compileProgram(vs, fs_quilt)
         
-        # Geometry
+        # Geometry (UV 0..1, no overscan in vertex data)
         quad = np.array([-1,-1,0,0, 1,-1,1,0, 1,1,1,1, -1,-1,0,0, 1,1,1,1, -1,1,0,1], dtype=np.float32)
         vao = GL.glGenVertexArrays(1); GL.glBindVertexArray(vao)
         vbo = GL.glGenBuffers(1); GL.glBindBuffer(GL.GL_ARRAY_BUFFER, vbo)
@@ -435,59 +441,93 @@ class LKGPlayer:
         GL.glEnableVertexAttribArray(0); GL.glVertexAttribPointer(0, 2, GL.GL_FLOAT, False, 16, None)
         GL.glEnableVertexAttribArray(1); GL.glVertexAttribPointer(1, 2, GL.GL_FLOAT, False, 16, GL.ctypes.c_void_p(8))
         
-        # Video Capture
-        cmd = ["ffmpeg", "-i", self.args.input, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1", "-loglevel", "quiet"]
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8)
+        # Detect static image vs video
+        is_static = self.args.input.lower().endswith(('.png', '.jpg', '.jpeg', '.bmp', '.tiff'))
         
         # Resolution detect
-        probe = subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=width,height", "-of", "csv=p=0", self.args.input]).decode().strip()
+        probe = subprocess.check_output(["ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=width,height", "-of", "csv=p=0", self.args.input]).decode().strip()
         vw, vh = map(int, probe.split(','))
-        print(f"Input: {vw}x{vh}")
+        print(f"[INPUT] file={os.path.basename(self.args.input)} resolution={vw}x{vh} static={is_static}")
         
+        # Texture setup
         tex = GL.glGenTextures(1)
         GL.glBindTexture(GL.GL_TEXTURE_2D, tex)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
         GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
+        GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
         GL.glPixelStorei(GL.GL_UNPACK_ALIGNMENT, 1)
         
+        # Load first frame / static image
+        proc = None
+        raw_frame = None
+        if is_static:
+            cmd = ["ffmpeg", "-i", self.args.input, "-frames:v", "1", "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1", "-loglevel", "quiet"]
+            result = subprocess.run(cmd, capture_output=True)
+            raw_frame = result.stdout
+            GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGB, vw, vh, 0, GL.GL_RGB, GL.GL_UNSIGNED_BYTE, raw_frame)
+        else:
+            cmd = ["ffmpeg", "-i", self.args.input, "-f", "rawvideo", "-pix_fmt", "rgb24", "pipe:1", "-loglevel", "quiet"]
+            proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8)
+        
         self.print_runtime_params("STARTUP")
+        self.update_parallax_scale()
+        frame_size = vw * vh * 3
         
         while not glfw.window_should_close(self.window) and self.running:
-            raw = proc.stdout.read(vw * vh * 3)
-            if not raw: break
-            
-            GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGB, vw, vh, 0, GL.GL_RGB, GL.GL_UNSIGNED_BYTE, raw)
+            if not is_static and proc:
+                raw_frame = proc.stdout.read(frame_size)
+                if not raw_frame or len(raw_frame) < frame_size:
+                    if hasattr(self.args, 'loop') and self.args.loop:
+                        proc.terminate()
+                        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, bufsize=10**8)
+                        continue
+                    else:
+                        break
+                GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGB, vw, vh, 0, GL.GL_RGB, GL.GL_UNSIGNED_BYTE, raw_frame)
             
             prog = self.prog_quilt if self.pipeline == "quilt" else self.prog_rgbd
             GL.glUseProgram(prog)
             
+            # Bind texture to unit 0
+            GL.glActiveTexture(GL.GL_TEXTURE0)
+            GL.glBindTexture(GL.GL_TEXTURE_2D, tex)
+            
             # Common uniforms
-            def set_f(name, val): loc = GL.glGetUniformLocation(prog, name); GL.glUniform1f(loc, val)
-            def set_i(name, val): loc = GL.glGetUniformLocation(prog, name); GL.glUniform1i(loc, val)
+            def set_f(name, val):
+                loc = GL.glGetUniformLocation(prog, name)
+                if loc != -1: GL.glUniform1f(loc, val)
+            def set_i(name, val):
+                loc = GL.glGetUniformLocation(prog, name)
+                if loc != -1: GL.glUniform1i(loc, val)
             
             set_f("pitch", self.pitch); set_f("tilt", self.tilt); set_f("center", self.center)
             set_f("subp", self.subp); set_i("flipSubp", self.flipSubp); set_i("invView", self.invView)
             
             if self.pipeline == "quilt":
+                set_i("texQuilt", 0)
                 c = self.quilt_cfg
                 set_i("quiltCols", c.cols); set_i("quiltRows", c.rows); set_i("quiltViews", c.views)
-                set_f("quiltAspect", c.aspect); set_f("inputAspect", vw/vh); set_i("quiltFit", c.fit)
+                set_f("quiltAspect", c.aspect); set_f("inputAspect", float(vw)/float(vh)); set_i("quiltFit", c.fit)
                 set_i("quiltFlipRows", c.flip_rows); set_i("debugFixedView", c.fixed_view)
                 set_f("quiltZoom", c.zoom); set_f("overscan", c.overscan)
             else:
+                set_i("texRGBD", 0)
                 set_f("focus", self.focus); set_f("depthiness", self.depthiness); set_f("parallaxScale", self.parallaxScale)
                 set_f("depthNear", self.depthNear); set_f("depthFar", self.depthFar); set_f("depthGamma", self.depthGamma)
                 set_f("depthSmooth", self.depthSmooth); set_f("depthContrast", self.depthContrast); set_f("edgeFade", self.edgeFade)
                 set_f("edgeLow", self.edgeLow); set_f("edgeHigh", self.edgeHigh); set_i("depthLoc", self.depthLoc)
                 set_i("invertDepth", self.invertDepth); set_i("debugMode", self.debugMode); set_i("testPattern", self.testPattern)
-                GL.glUniform2f(GL.glGetUniformLocation(prog, "texelSize"), 1.0/vw, 1.0/vh)
+                GL.glUniform2f(GL.glGetUniformLocation(prog, "texelSize"), 1.0/float(vw), 1.0/float(vh))
 
+            GL.glViewport(0, 0, fb_w, fb_h)
             GL.glClear(GL.GL_COLOR_BUFFER_BIT)
             GL.glDrawArrays(GL.GL_TRIANGLES, 0, 6)
             glfw.swap_buffers(self.window)
             glfw.poll_events()
             
-        proc.terminate()
+        if proc: proc.terminate()
         glfw.terminate()
 
 if __name__ == "__main__":
@@ -507,5 +547,6 @@ if __name__ == "__main__":
     parser.add_argument("--inv-view", type=int, default=1)
     parser.add_argument("--windowed", action="store_true")
     parser.add_argument("--calib-file")
+    parser.add_argument("--loop", action="store_true")
     args = parser.parse_args()
     LKGPlayer(args).run()

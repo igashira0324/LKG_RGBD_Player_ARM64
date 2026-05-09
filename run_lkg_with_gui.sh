@@ -140,5 +140,13 @@ if [ -n "${USER_CALIB_FILE:-}" ] && [ -f "$USER_CALIB_FILE" ]; then
     GUI_ARGS+=("--calib-file" "$USER_CALIB_FILE")
 fi
 
-"$VENV_PYTHON" "$GUI_SCRIPT" "${GUI_ARGS[@]}" "${EXTRA_ARGS[@]}"
+# Pass --pipeline to GUI if present in EXTRA_ARGS
+for i in "${!EXTRA_ARGS[@]}"; do
+    if [ "${EXTRA_ARGS[$i]}" = "--pipeline" ] && [ -n "${EXTRA_ARGS[$((i+1))]:-}" ]; then
+        GUI_ARGS+=("--pipeline" "${EXTRA_ARGS[$((i+1))]}")
+        break
+    fi
+done
+
+"$VENV_PYTHON" "$GUI_SCRIPT" "${GUI_ARGS[@]}"
 
